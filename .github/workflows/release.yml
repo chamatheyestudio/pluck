@@ -50,7 +50,7 @@ jobs:
           export PLUCK_ROOT="$RUNNER_TEMP/pluck" PLUCK_BUNDLED="$PWD/app" PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=""
           deno run -A --no-prompt --no-config shell/launch.ts > "$RUNNER_TEMP/run.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:47821/api/state > state.json && break; sleep 1; done
-          python3 -c 'import json; d=json.load(open("state.json")); assert d["version"] and d["shell"] == 1, d; print("Pluck", d["version"], "is up")'
+          python3 -c 'import json; d=json.load(open("state.json")); v=json.load(open("app/version.json")); assert d["version"] == v["version"] and d["shell"] == v["shell"], d; print("Pluck", d["version"], "is up, launcher", d["shell"])'
           cat "$PLUCK_ROOT/pluck.log"
 
   native-windows:
