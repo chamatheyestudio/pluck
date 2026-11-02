@@ -11,15 +11,25 @@ Six themes, each with its own download animation and soundtrack. Free, always. M
 
 These links always point to the newest version.
 
-**First open on a Mac:** open the disk image, drag Pluck into Applications and open it. macOS asks you to confirm the first time: open System Settings, go to Privacy & Security, scroll down and click Open Anyway.
+## Install on Windows
 
-**First run on Windows:** if Windows says it protected your PC, click More info, then Run anyway. Pluck installs just for you, no admin password needed.
+1. Download [Pluck-Setup.exe](https://github.com/chamatheyestudio/pluck/releases/latest/download/Pluck-Setup.exe). If your browser says it isn't commonly downloaded, choose **Keep**.
+2. Open it. If Windows says "Windows protected your PC", click **More info**, then **Run anyway**. That's only because the app isn't signed by Microsoft.
+3. Click **Next**, then **Finish**. No admin password needed.
+4. Pick a theme. The first time, Pluck takes about a minute to set itself up, so leave it open until it says "All set".
+5. Paste any link, pick a format and hit the big button. Your files go to **Documents › Pluck**.
 
-The first time Pluck opens it fetches its download engines, which takes about a minute. After that it keeps itself up to date: fixes for sites every day, and new versions, themes and features as they come out.
+## Install on Mac
+
+1. Download [Pluck.dmg](https://github.com/chamatheyestudio/pluck/releases/latest/download/Pluck.dmg), open it and drag Pluck into **Applications**.
+2. Open Pluck from Applications. The first time, macOS asks you to confirm: open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**.
+3. Pick a theme and let Pluck set itself up for about a minute.
+
+Pluck keeps itself up to date: fixes for sites every day, and new versions, themes and features as they come out.
 
 ## Good to know
 
 - Downloads go to Documents › Pluck. Change it any time in Settings.
-- Stories, highlights and private posts need you signed in. In Settings, pick the browser where you're logged in.
+- Stories, highlights and private posts need you signed in. On Windows, stay logged in to Instagram in **Firefox** and pick Firefox in Pluck's Settings. On a Mac, Chrome or Safari works too.
 - Spotify songs are matched and downloaded from YouTube Music, because Spotify's own audio is locked.
 - Use it for your own content, client content you have rights to, or reference.
