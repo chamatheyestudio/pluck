@@ -1,5 +1,6 @@
-# Builds Pluck for Mac and Windows on every push, and publishes a release for every v* tag.
-# Installed copies of Pluck read latest.json from the newest release and update themselves.
+# Builds and tests Pluck for Mac and Windows on every push. When main has a version in app/version.json
+# that has no release yet, it publishes one (tag v<version>). Installed copies of Pluck read latest.json
+# from the newest release and update themselves.
 name: Build and release
 
 on:
@@ -21,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -28,14 +30,21 @@ jobs:
           deno-version: v2.x
       - name: Type check
         run: deno check app/server.ts shell/launch.ts
-      - name: Version matches tag
+      - name: Version and release check
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           v=$(python3 -c 'import json; print(json.load(open("app/version.json"))["version"])')
           echo "version=$v" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$v" ]]; then
             echo "::error::Tag ${GITHUB_REF#refs/tags/} does not match app/version.json ($v)"; exit 1
           fi
+          release=false
+          if [[ "$GITHUB_EVENT_NAME" == push && ( "$GITHUB_REF" == refs/heads/main || "$GITHUB_REF" == refs/tags/v* ) ]]; then
+            if gh release view "v$v" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then echo "v$v is already released"; else release=true; echo "v$v will be released"; fi
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
       - name: Smoke test
         run: |
           export PLUCK_ROOT="$RUNNER_TEMP/pluck" PLUCK_BUNDLED="$PWD/app" PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=""
@@ -123,7 +132,7 @@ jobs:
           echo "Uninstalled cleanly"
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.check.outputs.release == 'true'
     needs: [check, windows, mac, test-mac, test-windows]
     runs-on: ubuntu-latest
     steps:
@@ -133,11 +142,11 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Build the update feed
-        run: scripts/build-feed.sh dist "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+        run: scripts/build-feed.sh dist "https://github.com/${{ github.repository }}/releases/download/v${{ needs.check.outputs.version }}"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/release-notes.py > notes.md
-          gh release create "${{ github.ref_name }}" dist/Pluck.dmg dist/Pluck-Setup.exe dist/app.zip dist/latest.json \
-            --title "Pluck ${{ needs.check.outputs.version }}" --notes-file notes.md --latest
+          gh release create "v${{ needs.check.outputs.version }}" dist/Pluck.dmg dist/Pluck-Setup.exe dist/app.zip dist/latest.json \
+            --target "$GITHUB_SHA" --title "Pluck ${{ needs.check.outputs.version }}" --notes-file notes.md --latest

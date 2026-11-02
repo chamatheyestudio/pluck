@@ -25,9 +25,10 @@ joke that fits the theme. Keep it that way.
 
 1. Make the change in `app/`.
 2. Bump `version` in `app/version.json` and replace `notes` with a few short lines for "What's new".
-3. Commit, then tag and push: `git tag v1.0.1 && git push origin main v1.0.1`.
+3. Commit and push to `main`.
 
-The workflow publishes the release. Installed copies check `latest.json` a few seconds after opening and every
+The workflow builds both installers, installs them on real macOS and Windows runners (setup, downloads, and an
+update plus restart), and when the version has no release yet it publishes `v<version>`. No tag needed. Installed copies check `latest.json` a few seconds after opening and every
 6 hours, download `app.zip`, verify its sha256, and show "Pluck 1.0.1 is ready · Restart". Otherwise the update
 installs the next time Pluck opens. New themes are part of `ui/index.html`, so they ship the same way.
 
