@@ -1,8 +1,9 @@
 {
-  "version": "1.0.1",
-  "shell": 1,
+  "version": "1.1.0",
+  "shell": 2,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "The theme picker now shows every theme live, so you can see the look and the download animation before you choose."
+    "Pluck is now its own app, with its own window and its own icon in the Dock and taskbar. No browser needed.",
+    "Copy, paste and the usual shortcuts work like any other app."
   ]
 }

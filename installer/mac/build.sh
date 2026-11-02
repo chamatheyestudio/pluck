@@ -13,8 +13,17 @@ R="$APP/Contents/Resources"
 
 rm -rf "$B"; mkdir -p "$APP/Contents/MacOS" "$R"
 
-# The app's executable: a tiny universal binary that starts launch.sh in the background.
-clang -O2 -Wall -mmacosx-version-min=11.0 -arch arm64 -arch x86_64 -o "$APP/Contents/MacOS/Pluck" "$HERE/stub.c"
+# The app itself: the native Pluck window (shell/native), one universal binary for both kinds of Mac.
+# It starts launch.sh (the engine) in the background and shows Pluck in its own window.
+export MACOSX_DEPLOYMENT_TARGET=11.0
+rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+for t in aarch64-apple-darwin x86_64-apple-darwin; do
+  cargo build --release --locked --manifest-path "$REPO/shell/native/Cargo.toml" --target "$t"
+done
+lipo -create -output "$APP/Contents/MacOS/Pluck" \
+  "$REPO/shell/native/target/aarch64-apple-darwin/release/pluck" \
+  "$REPO/shell/native/target/x86_64-apple-darwin/release/pluck"
+lipo -info "$APP/Contents/MacOS/Pluck"
 sed "s/__VERSION__/$VERSION/g" "$HERE/Info.plist" > "$APP/Contents/Info.plist"
 printf "APPL????" > "$APP/Contents/PkgInfo"
 cp "$HERE/Pluck.icns" "$R/Pluck.icns"

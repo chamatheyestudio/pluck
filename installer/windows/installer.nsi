@@ -47,9 +47,9 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
-; Close a running Pluck so its files can be replaced. Only touches Pluck's own copy of Deno.
+; Close a running Pluck (its window and its engine) so files can be replaced. Only touches Pluck's own files.
 !macro StopPluck
-  nsExec::Exec `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process deno -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith((Join-Path $$env:LOCALAPPDATA 'Pluck'), [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
+  nsExec::Exec `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process deno,pluck -ErrorAction SilentlyContinue | Where-Object { $$_.Path -and $$_.Path.StartsWith((Join-Path $$env:LOCALAPPDATA 'Pluck'), [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"`
   Pop $0
   Sleep 500
 !macroend
@@ -69,6 +69,7 @@ Section "Pluck"
   File /r "${BUILD}\bundle\*.*"
   SetOutPath "$INSTDIR\bin"
   File "${BUILD}\bin\deno.exe"
+  File "${BUILD}\engine.exe"
   SetOutPath "$INSTDIR"
   File "${BUILD}\Pluck.exe"
   File "${__FILEDIR__}\Pluck.ico"

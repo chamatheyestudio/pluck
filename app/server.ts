@@ -11,6 +11,8 @@ const APP_DIR = import.meta.dirname ?? ".";
 const ROOT = Deno.env.get("PLUCK_ROOT") ?? parent(APP_DIR);
 const BIN = join(ROOT, "bin");
 const NO_WINDOW = !!Deno.env.get("PLUCK_NO_WINDOW");
+// Started by the native Pluck app, which shows the window itself.
+const NATIVE = !!Deno.env.get("PLUCK_NATIVE");
 const NO_EXIT = !!Deno.env.get("PLUCK_NO_EXIT");
 const RESTARTED = Deno.env.get("PLUCK_RESTART") === "1";
 // Set by the launcher that ships with the installer (shell/launch.ts). 0 means Pluck was started some other way.
@@ -1348,7 +1350,7 @@ async function openUrl(u: string) {
 }
 
 async function openWindow() {
-  if (NO_WINDOW) return;
+  if (NO_WINDOW || NATIVE) return;
   const url = `http://127.0.0.1:${PORT}/`;
   const prof = join(ROOT, "window");
   const flags = [`--app=${url}`, `--user-data-dir=${prof}`, "--window-size=1200,820", "--no-first-run", "--no-default-browser-check", "--disable-features=Translate"];

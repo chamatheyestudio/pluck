@@ -2,3 +2,4 @@ dist/
 installer/*/build/
 .DS_Store
 *.download
+shell/native/target/

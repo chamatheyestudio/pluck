@@ -12,9 +12,16 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-  <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>NSRequiresAquaSystemAppearance</key><false/>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key><true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+  </dict>
   <key>NSHumanReadableCopyright</key><string>Made by Matte Black. Free, always.</string>
 </dict>
 </plist>

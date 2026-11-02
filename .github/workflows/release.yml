@@ -53,15 +53,32 @@ jobs:
           python3 -c 'import json; d=json.load(open("state.json")); assert d["version"] and d["shell"] == 1, d; print("Pluck", d["version"], "is up")'
           cat "$PLUCK_ROOT/pluck.log"
 
-  windows:
+  native-windows:
     needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Pluck window (Pluck.exe)
+        run: cargo build --release --locked --manifest-path shell/native/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows
+          path: shell/native/target/release/pluck.exe
+          if-no-files-found: error
+
+  windows:
+    needs: [check, native-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-windows
+          path: native
       - name: Install NSIS
         run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
       - name: Build Pluck-Setup.exe
-        run: installer/windows/build.sh dist
+        run: PLUCK_APP_EXE=native/pluck.exe installer/windows/build.sh dist
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -97,11 +114,24 @@ jobs:
           cp -R /tmp/pluckdmg/Pluck.app /Applications/
           hdiutil detach /tmp/pluckdmg
           codesign --verify --verbose=2 /Applications/Pluck.app
-      - name: Open Pluck and download
+      - name: Start Pluck and download
         run: |
           export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=http://127.0.0.1:8765/upd/latest.json
-          /Applications/Pluck.app/Contents/MacOS/Pluck
+          /Applications/Pluck.app/Contents/MacOS/Pluck --smoke
           scripts/e2e.sh "$HOME/Library/Application Support/Pluck"
+      - name: Open the Pluck window
+        continue-on-error: true
+        run: |
+          open -a /Applications/Pluck.app
+          sleep 15
+          screencapture -x mac-window.png
+          pgrep -lf "Pluck.app/Contents/MacOS/Pluck" || (echo "::warning::the Pluck window is not running"; exit 1)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-window
+          path: mac-window.png
+          if-no-files-found: ignore
 
   test-windows:
     needs: windows
@@ -119,11 +149,30 @@ jobs:
         run: |
           ./dist/Pluck-Setup.exe //S
           ls -la "$LOCALAPPDATA/Pluck" "$LOCALAPPDATA/Pluck/bin"
-      - name: Open Pluck and download
+      - name: Start Pluck and download
         run: |
           export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=http://127.0.0.1:8765/upd/latest.json
-          "$LOCALAPPDATA/Pluck/Pluck.exe"
+          "$LOCALAPPDATA/Pluck/Pluck.exe" --smoke
           scripts/e2e.sh "$(cygpath -u "$LOCALAPPDATA")/Pluck"
+      - name: Open the Pluck window
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Start-Process "$env:LOCALAPPDATA\Pluck\Pluck.exe"
+          Start-Sleep -Seconds 20
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\win-window.png")
+          Get-Process pluck -ErrorAction Stop | Format-Table Id, ProcessName, MainWindowTitle
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-window
+          path: win-window.png
+          if-no-files-found: ignore
       - name: Uninstall
         run: |
           "$LOCALAPPDATA/Pluck/Uninstall Pluck.exe" //S
