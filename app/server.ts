@@ -1417,7 +1417,7 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path === "/api/state") {
       const news = settings.lastVersion && settings.lastVersion !== VERSION ? { version: VERSION, notes: VINFO.notes } : null;
-      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, ...snapshot() });
+      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, windows: clients.size, ...snapshot() });
     }
     if (path === "/api/events") {
       let client: Client;

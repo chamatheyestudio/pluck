@@ -120,12 +120,12 @@ jobs:
           /Applications/Pluck.app/Contents/MacOS/Pluck --smoke
           scripts/e2e.sh "$HOME/Library/Application Support/Pluck"
       - name: Open the Pluck window
-        continue-on-error: true
         run: |
           open -a /Applications/Pluck.app
           sleep 15
-          screencapture -x mac-window.png
-          pgrep -lf "Pluck.app/Contents/MacOS/Pluck" || (echo "::warning::the Pluck window is not running"; exit 1)
+          screencapture -x mac-window.png || true
+          pgrep -lf "Pluck.app/Contents/MacOS/Pluck"
+          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["windows"]; print("windows showing Pluck:", n); sys.exit(0 if n >= 1 else 1)'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -155,7 +155,6 @@ jobs:
           "$LOCALAPPDATA/Pluck/Pluck.exe" --smoke
           scripts/e2e.sh "$(cygpath -u "$LOCALAPPDATA")/Pluck"
       - name: Open the Pluck window
-        continue-on-error: true
         shell: pwsh
         run: |
           Start-Process "$env:LOCALAPPDATA\Pluck\Pluck.exe"
@@ -167,6 +166,9 @@ jobs:
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD\win-window.png")
           Get-Process pluck -ErrorAction Stop | Format-Table Id, ProcessName, MainWindowTitle
+          $n = (Invoke-RestMethod http://127.0.0.1:47821/api/state).windows
+          "windows showing Pluck: $n"
+          if ($n -lt 1) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
