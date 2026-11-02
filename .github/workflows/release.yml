@@ -90,7 +90,8 @@ jobs:
           codesign --verify --verbose=2 /Applications/Pluck.app
       - name: Open Pluck and download
         run: |
-          PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 /Applications/Pluck.app/Contents/MacOS/Pluck
+          export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=http://127.0.0.1:8765/upd/latest.json
+          /Applications/Pluck.app/Contents/MacOS/Pluck
           scripts/e2e.sh "$HOME/Library/Application Support/Pluck"
 
   test-windows:
@@ -111,7 +112,7 @@ jobs:
           ls -la "$LOCALAPPDATA/Pluck" "$LOCALAPPDATA/Pluck/bin"
       - name: Open Pluck and download
         run: |
-          export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1
+          export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=http://127.0.0.1:8765/upd/latest.json
           "$LOCALAPPDATA/Pluck/Pluck.exe"
           scripts/e2e.sh "$(cygpath -u "$LOCALAPPDATA")/Pluck"
       - name: Uninstall

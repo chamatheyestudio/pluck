@@ -41,6 +41,22 @@ state | py 'import json,sys
 for j in json.load(sys.stdin)["jobs"]: print(j["status"], j["mode"], j["files"], j.get("error") or "")'
 case "$r" in *error*|*running*|*queued*) echo "::error::downloads did not finish: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
 
+if [ -n "${PLUCK_FEED:-}" ]; then
+  echo "Testing an update to 99.0.0"
+  REPO="$(cd "$(dirname "$0")/.." && pwd)"
+  T="$(mktemp -d)"; cp -R "$REPO/app" "$T/app"
+  py 'import json,sys; p=sys.argv[1]; v=json.load(open(p)); v["version"]="99.0.0"; v["notes"]=["Test update"]; json.dump(v, open(p, "w"))' "$T/app/version.json"
+  "$REPO/scripts/build-feed.sh" "$MEDIA/upd" "http://127.0.0.1:8765/upd" "$T/app" > /dev/null
+  curl -sf "${H[@]}" -d '{}' "$API/api/update" > /dev/null
+  for i in $(seq 1 45); do u=$(state | py 'import json,sys; print(json.load(sys.stdin)["app"]["state"])'); [ "$u" = ready ] && break; sleep 2; done
+  echo "update: $u"
+  [ "$u" = ready ] || { echo "::error::update was not staged"; cat "$ROOT/pluck.log"; exit 1; }
+  curl -sf "${H[@]}" -d '{}' "$API/api/restart" > /dev/null
+  for i in $(seq 1 45); do v=$(state 2>/dev/null | py 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null || true); [ "$v" = 99.0.0 ] && break; sleep 2; done
+  state | py 'import json,sys; d=json.load(sys.stdin); print("after restart:", d["version"], "news:", d["news"])'
+  [ "$v" = 99.0.0 ] || { echo "::error::Pluck did not come back on the new version"; cat "$ROOT/pluck.log"; exit 1; }
+fi
+
 curl -sf "${H[@]}" -d '{"openAtLogin":true}' "$API/api/settings" > /dev/null && echo "open at login: on"
 curl -sf "${H[@]}" -d '{"openAtLogin":false}' "$API/api/settings" > /dev/null && echo "open at login: off"
 echo "--- pluck.log"; cat "$ROOT/pluck.log"
