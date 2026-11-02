@@ -1,10 +1,8 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "shell": 1,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "Pluck is here. Paste any link, pick a format, done.",
-    "Six themes, each with its own animation and soundtrack.",
-    "Updates itself, so it keeps working when sites change."
+    "The theme picker now shows every theme live, so you can see the look and the download animation before you choose."
   ]
 }
