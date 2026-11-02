@@ -9,6 +9,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      shots:
+        description: Print small window screenshots into the test logs
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -124,6 +129,7 @@ jobs:
           open -a /Applications/Pluck.app
           sleep 15
           screencapture -x mac-window.png || true
+          if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-window.png --out mac-small.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-small.jpg && echo "SHOT-END"; fi
           pgrep -lf "Pluck.app/Contents/MacOS/Pluck"
           curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["windows"]; print("windows showing Pluck:", n); sys.exit(0 if n >= 1 else 1)'
       - uses: actions/upload-artifact@v4
@@ -165,6 +171,18 @@ jobs:
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD\win-window.png")
+          if ("${{ inputs.shots }}" -eq "true") {
+            $w = 1100; $h = [int]($b.Height * $w / $b.Width)
+            $small = New-Object System.Drawing.Bitmap $bmp, $w, $h
+            $enc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
+            $ps = New-Object System.Drawing.Imaging.EncoderParameters 1
+            $ps.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 55L
+            $small.Save("$PWD\win-small.jpg", $enc, $ps)
+            "SHOT-BEGIN"
+            $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\win-small.jpg"))
+            for ($i = 0; $i -lt $b64.Length; $i += 100) { $b64.Substring($i, [Math]::Min(100, $b64.Length - $i)) }
+            "SHOT-END"
+          }
           Get-Process pluck -ErrorAction Stop | Format-Table Id, ProcessName, MainWindowTitle
           $n = (Invoke-RestMethod http://127.0.0.1:47821/api/state).windows
           "windows showing Pluck: $n"
