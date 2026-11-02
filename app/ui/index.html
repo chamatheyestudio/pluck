@@ -1428,7 +1428,7 @@ function showOnboarding() {
   $("#onboard").classList.add("on");
   sizePreviews();
   if (document.fonts) document.fonts.ready.then(sizePreviews);
-  setTimeout(() => { const f = $(".ob[data-t=matte]"); if (f) f.focus(); }, 50);
+  setTimeout(() => { const f = $(".ob[data-t=matte]"); if (f) f.focus({ preventScroll: true }); }, 50);
 }
 function closeOnboarding() {
   $("#onboard").classList.remove("on");

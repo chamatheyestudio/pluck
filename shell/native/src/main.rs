@@ -69,10 +69,17 @@ fn main() {
     #[cfg(target_os = "macos")]
     let menu = mac_menu();
 
+    // 1200 x 820 when it fits, smaller on small screens.
+    let (mut w, mut h) = (1200.0_f64, 820.0_f64);
+    if let Some(m) = event_loop.primary_monitor() {
+        let s: LogicalSize<f64> = m.size().to_logical(m.scale_factor());
+        w = w.min(s.width * 0.94);
+        h = h.min(s.height * 0.88);
+    }
     let window = WindowBuilder::new()
         .with_title("Pluck")
-        .with_inner_size(LogicalSize::new(1200.0, 820.0))
-        .with_min_inner_size(LogicalSize::new(980.0, 640.0))
+        .with_inner_size(LogicalSize::new(w, h))
+        .with_min_inner_size(LogicalSize::new(w.min(980.0), h.min(640.0)))
         .with_theme(Some(Theme::Dark))
         .with_background_color(BG)
         .with_window_icon(Icon::from_rgba(include_bytes!("../icon64.rgba").to_vec(), 64, 64).ok())

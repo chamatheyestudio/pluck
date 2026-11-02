@@ -1,9 +1,9 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "shell": 2,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
     "Pluck is now its own app, with its own window and its own icon in the Dock and taskbar. No browser needed.",
-    "Copy, paste and the usual shortcuts work like any other app."
+    "Fits smaller laptop screens better."
   ]
 }
