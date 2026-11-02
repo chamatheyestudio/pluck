@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "shell": 1,
+  "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
+  "notes": [
+    "Pluck is here. Paste any link, pick a format, done.",
+    "Six themes, each with its own animation and soundtrack.",
+    "Updates itself, so it keeps working when sites change."
+  ]
+}

@@ -1,0 +1,93 @@
+# Builds Pluck for Mac and Windows on every push, and publishes a release for every v* tag.
+# Installed copies of Pluck read latest.json from the newest release and update themselves.
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type check
+        run: deno check app/server.ts shell/launch.ts
+      - name: Version matches tag
+        id: v
+        run: |
+          v=$(python3 -c 'import json; print(json.load(open("app/version.json"))["version"])')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$v" ]]; then
+            echo "::error::Tag ${GITHUB_REF#refs/tags/} does not match app/version.json ($v)"; exit 1
+          fi
+      - name: Smoke test
+        run: |
+          export PLUCK_ROOT="$RUNNER_TEMP/pluck" PLUCK_BUNDLED="$PWD/app" PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 PLUCK_FEED=""
+          deno run -A --no-prompt --no-config shell/launch.ts > "$RUNNER_TEMP/run.log" 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:47821/api/state > state.json && break; sleep 1; done
+          python3 -c 'import json; d=json.load(open("state.json")); assert d["version"] and d["shell"] == 1, d; print("Pluck", d["version"], "is up")'
+          cat "$PLUCK_ROOT/pluck.log"
+
+  windows:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install NSIS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
+      - name: Build Pluck-Setup.exe
+        run: installer/windows/build.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Pluck-Setup.exe
+          if-no-files-found: error
+
+  mac:
+    needs: check
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Pluck.dmg
+        run: installer/mac/build.sh dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: dist/Pluck.dmg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, windows, mac]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Build the update feed
+        run: scripts/build-feed.sh dist "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release-notes.py > notes.md
+          gh release create "${{ github.ref_name }}" dist/Pluck.dmg dist/Pluck-Setup.exe dist/app.zip dist/latest.json \
+            --title "Pluck ${{ needs.check.outputs.version }}" --notes-file notes.md --latest
