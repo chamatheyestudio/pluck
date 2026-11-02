@@ -72,9 +72,58 @@ jobs:
           path: dist/Pluck.dmg
           if-no-files-found: error
 
+  test-mac:
+    needs: mac
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac
+          path: dist
+      - name: Install from the disk image
+        run: |
+          hdiutil attach dist/Pluck.dmg -nobrowse -mountpoint /tmp/pluckdmg
+          ls -la /tmp/pluckdmg
+          cp -R /tmp/pluckdmg/Pluck.app /Applications/
+          hdiutil detach /tmp/pluckdmg
+          codesign --verify --verbose=2 /Applications/Pluck.app
+      - name: Open Pluck and download
+        run: |
+          PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1 /Applications/Pluck.app/Contents/MacOS/Pluck
+          scripts/e2e.sh "$HOME/Library/Application Support/Pluck"
+
+  test-windows:
+    needs: windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: dist
+      - name: Install silently
+        run: |
+          ./dist/Pluck-Setup.exe //S
+          ls -la "$LOCALAPPDATA/Pluck" "$LOCALAPPDATA/Pluck/bin"
+      - name: Open Pluck and download
+        run: |
+          export PLUCK_NO_WINDOW=1 PLUCK_NO_EXIT=1
+          "$LOCALAPPDATA/Pluck/Pluck.exe"
+          scripts/e2e.sh "$(cygpath -u "$LOCALAPPDATA")/Pluck"
+      - name: Uninstall
+        run: |
+          "$LOCALAPPDATA/Pluck/Uninstall Pluck.exe" //S
+          sleep 8
+          if [ -d "$LOCALAPPDATA/Pluck" ]; then echo "::error::uninstall left files behind"; ls -la "$LOCALAPPDATA/Pluck"; exit 1; fi
+          echo "Uninstalled cleanly"
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [check, windows, mac]
+    needs: [check, windows, mac, test-mac, test-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
