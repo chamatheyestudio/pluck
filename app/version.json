@@ -1,9 +1,9 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "shell": 3,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "Save just a part. Pick Just a part under Length, then drag the handles or type the start and end times.",
-    "Works for videos, MP3 and WAV, from YouTube, Instagram, TikTok and the rest."
+    "Copy a link anywhere, in your browser, WhatsApp or the Instagram app, and a small Pluck card pops up. Save it in one click, or pick More options.",
+    "Closing the window keeps Pluck ready in the Dock on Mac and in the taskbar corner on Windows. You can turn this off in Settings."
   ]
 }

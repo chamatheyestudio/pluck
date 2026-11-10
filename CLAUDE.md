@@ -14,6 +14,10 @@ joke that fits the theme. Keep it that way.
 - `shell/native`: the Pluck window, a small Rust app (tao + wry, the system web view). It is the app people open:
   it starts the engine in the background, shows a warm up screen until the engine answers, then shows the UI.
   One copy at a time (a second launch focuses the first). Mac gets a real menu bar so copy and paste work.
+  It watches the clipboard: when a link is copied it asks the engine (`/api/clip`) and, if it's one Pluck can
+  save, opens a small card in the corner that loads `ui/popup.html` (so the card itself updates with the app).
+  While "Pop up when I copy a link" is on, closing the window hides it (Dock on Mac, tray icon on Windows) and
+  `--background` starts it hidden at login. It checks in with the engine every 10 seconds (`/api/native`).
 - `shell/launch.ts`: the launcher that ships inside the installers. It picks the newest good copy of the app
   (installed, staged update, or the one bundled with the installer), swaps updates in, and rolls back a version
   that fails to start. It is never auto updated, so keep it small and stable.
@@ -37,7 +41,7 @@ update plus restart), and when the version has no release yet it publishes `v<ve
 installs the next time Pluck opens. New themes are part of `ui/index.html`, so they ship the same way.
 
 Only bump `shell` in `app/version.json` (and `SHELL` in `shell/launch.ts`) when the app needs something new from
-the launcher, the native window or the installers (shell 2 = the native window). Copies with an older launcher are then told to download the new installer instead.
+the launcher, the native window or the installers (shell 2 = the native window, shell 3 = copied link card and running in the background). Copies with an older launcher are then told to download the new installer instead.
 
 Never change the feed URL in `version.json` or the bundle id `com.matteblack.pluck`: installed copies depend on them.
 
