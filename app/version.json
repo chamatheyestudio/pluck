@@ -4,6 +4,6 @@
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
     "Public Instagram posts, Reels and carousels save without signing in. Stories and private posts still need your browser.",
-    "The copied links card shows where your files go, with a Change button."
+    "The copied links card shows where your files go, with a Change button, and scrolls when you copy lots of links."
   ]
 }

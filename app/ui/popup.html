@@ -12,14 +12,21 @@
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-user-select:none;user-select:none;cursor:default;overflow:hidden}
 #card{border:1px solid var(--line);display:flex;flex-direction:column;max-height:100vh}
-.hd{display:flex;align-items:center;gap:8px;padding:11px 10px 11px 16px;font-size:11px;color:var(--muted);flex:none;min-height:50px}
+.hd{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 16px;font-size:11px;color:var(--muted);flex:none;min-height:44px}
 .hd b{color:var(--fg);font-weight:700;font-size:13px;letter-spacing:-.01em}
 .hd .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .x{width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:15px;line-height:1;cursor:pointer;flex:none}
 .x:hover{background:var(--line);color:var(--fg)}
-.list{overflow-y:auto;flex:1;min-height:0}
-.row{display:flex;align-items:center;gap:12px;padding:12px 14px 12px 16px;border-top:1px solid var(--line)}
-.th{width:48px;height:48px;flex:none;border-radius:7px;background:var(--card) center/cover no-repeat;position:relative;overflow:hidden}
+.list{overflow-y:scroll;flex:1;min-height:0;overscroll-behavior:contain;position:relative}
+.list::-webkit-scrollbar{width:10px}
+.list::-webkit-scrollbar-track{background:transparent}
+.list::-webkit-scrollbar-thumb{background:var(--muted);opacity:.5;border-radius:6px;border:3px solid var(--bg);min-height:28px}
+.list.fits{overflow-y:hidden}
+.wrap{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+.wrap:after{content:"";position:absolute;left:0;right:10px;bottom:0;height:28px;background:linear-gradient(transparent,var(--bg));pointer-events:none;opacity:0;transition:opacity .2s}
+.wrap.more:after{opacity:1}
+.row{display:flex;align-items:center;gap:12px;padding:10px 12px 10px 16px;border-top:1px solid var(--line)}
+.th{width:44px;height:44px;flex:none;border-radius:7px;background:var(--card) center/cover no-repeat;position:relative;overflow:hidden}
 .th.load:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);animation:sh 1.2s linear infinite}
 @keyframes sh{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
@@ -37,7 +44,7 @@ button.b:disabled{opacity:.45;cursor:default;filter:none}
 .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
 .rm{opacity:0;transition:opacity .15s}
-.ft{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);flex:none}
+.ft{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);flex:none}
 .ft span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ft b{color:var(--fg);font-weight:500}
 .ft button{border:0;background:transparent;color:var(--acc);font:600 11px inherit;font-family:inherit;cursor:pointer;padding:4px 2px}
@@ -47,7 +54,7 @@ button.b:disabled{opacity:.45;cursor:default;filter:none}
 <body>
 <div id="card">
   <div class="hd"><b>pluck</b><span class="n" id="count">Link copied</span><span id="all"></span><button class="x" id="x" type="button" title="Close">×</button></div>
-  <div class="list" id="list"></div>
+  <div class="wrap" id="wrap"><div class="list" id="list"></div></div>
   <div class="ft"><span>Saves to <b id="folder">your Pluck folder</b></span><button type="button" id="chg">Change</button></div>
 </div>
 <script>
@@ -70,7 +77,15 @@ const thumb = (u) => (!u ? "" : u.startsWith("data:") ? u : "/api/thumb?u=" + en
 // Keep the window the same height as the card.
 let lastH = 0;
 function fit() { const h = Math.ceil($(".hd").offsetHeight + $("#list").scrollHeight + $(".ft").offsetHeight + 2); if (h !== lastH) { lastH = h; native("size:" + h); } }
-new ResizeObserver(fit).observe($("#list"));
+new ResizeObserver(() => { fit(); edges(); }).observe($("#list"));
+// A fade at the bottom while there are more links below, and the scrollbar only when they don't all fit.
+function edges() {
+  const l = $("#list");
+  const over = l.scrollHeight > l.clientHeight + 2;
+  l.classList.toggle("fits", !over);
+  $("#wrap").classList.toggle("more", over && l.scrollTop + l.clientHeight < l.scrollHeight - 4);
+}
+$("#list").addEventListener("scroll", edges, { passive: true });
 function closeAll() { post("/api/copied", { clear: true }).catch(() => {}).finally(() => native("close")); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
 
@@ -195,7 +210,9 @@ function remove(r) {
   if (!rows.size) native("close"); else header();
 }
 
+window.addEventListener("resize", () => edges());
 function header() {
+  requestAnimationFrame(edges);
   const list = [...rows.values()];
   const n = list.length;
   const ready = list.filter((r) => r.state === "ready" || (r.state === "look" && !r.want)).length;
