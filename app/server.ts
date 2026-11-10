@@ -455,6 +455,19 @@ async function probeSpotify(url: string, pf: Platform): Promise<Info> {
   };
 }
 
+// One look per link at a time: the copied link card, the window and a download all share it.
+const probing = new Map<string, Promise<Info>>();
+function probeShared(url: string): Promise<Info> {
+  const hit = probeCache.get(url);
+  if (hit) return Promise.resolve(hit);
+  let p = probing.get(url);
+  if (!p) {
+    p = probe(url).then((i) => { probeCache.set(url, i); return i; }).finally(() => probing.delete(url));
+    probing.set(url, p);
+  }
+  return p;
+}
+
 async function probe(url: string): Promise<Info> {
   const pf = detect(url);
   if (pf.id === "spotify") return await probeSpotify(url, pf);
@@ -1626,6 +1639,8 @@ async function handle(req: Request): Promise<Response> {
         if (pf.id === "youtube" && !/\/(watch|shorts|live|embed|playlist)|youtu\.be\/./.test(u)) ok = false;
         if (pf.id === "spotify" && pf.sub === "Link") ok = false;
       } catch { ok = false; }
+      // Start reading the link right away, so the card has it sooner.
+      if (ok && have("ytdlp") && !setupRun) probeShared(u).catch(() => {});
       return json(ok ? { show: true, url: u } : { show: false });
     }
     if (path === "/icon.png") {
@@ -1677,14 +1692,14 @@ async function handle(req: Request): Promise<Response> {
         if (setupRun) await setupRun;
         if (!have("ytdlp")) throw new Friendly("Pluck is still missing its download engine. Open Settings and choose Finish setup.");
         if (updating) await Promise.race([updating, sleep(20000)]);
-        const info = await probe(u);
+        const info = await probeShared(u);
         probeCache.set(u, info);
         return json(info);
       }
       case "/api/download": {
         let u = pickUrl(String(body.url ?? ""));
         let info = probeCache.get(u);
-        if (!info) { info = await probe(u); probeCache.set(u, info); }
+        if (!info) info = await probeShared(u);
         const j: Job = {
           id: uid(), url: u, info, mode: String(body.mode ?? "video"), quality: String(body.quality ?? "best"),
           select: Array.isArray(body.select) ? body.select.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n < info!.items.length) : [],

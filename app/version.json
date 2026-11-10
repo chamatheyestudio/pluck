@@ -1,9 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "shell": 3,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "Copy a link anywhere, in your browser, WhatsApp or the Instagram app, and a small Pluck card pops up. Save it in one click, or pick More options.",
-    "Closing the window keeps Pluck ready in the Dock on Mac and in the taskbar corner on Windows. You can turn this off in Settings."
+    "The copied link card now stays open until Pluck has read the link, and starts reading the moment you copy."
   ]
 }

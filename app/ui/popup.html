@@ -141,15 +141,19 @@ document.addEventListener("click", (e) => {
     r.setProperty("--bg", t[0]); r.setProperty("--fg", t[1]); r.setProperty("--acc", t[2]); r.setProperty("--accfg", t[3]);
     if (n.theme === "gazette") { r.setProperty("--line", "rgba(0,0,0,.12)"); r.setProperty("--card", "#EAE3D6"); r.setProperty("--muted", "#6E685E"); }
   } catch (e) {}
-  fit(); later(15000);
+  // Stay open while Pluck reads the link, however long it takes.
+  $("#act").innerHTML = `<div class="btns"><button class="b l" id="open" type="button" style="padding-left:0">Open in Pluck</button></div>`;
+  fit();
+  const slow = setTimeout(() => { if (!info) $("#tt").textContent = "Still looking. Some posts take a little longer…"; }, 7000);
   try {
     info = await post("/api/probe", { url: link });
+    clearTimeout(slow);
     $("#pf").textContent = `${info.platform.name}${info.platform.sub ? " " + info.platform.sub.toLowerCase() : ""}${info.author ? " · " + info.author : ""}`;
     $("#tt").textContent = info.title || "Ready to save";
     $("#th").classList.remove("load");
     if (info.thumb) $("#th").style.backgroundImage = `url("${info.thumb.startsWith("data:") ? info.thumb : "/api/thumb?u=" + encodeURIComponent(info.thumb)}")`;
     showReady();
-  } catch (e) { showError(e.message); }
+  } catch (e) { clearTimeout(slow); showError(e.message); }
 })();
 </script>
 </body>
