@@ -721,6 +721,7 @@ function detect(raw) {
   if (is("x.com", "twitter.com")) return "X post";
   if (is("facebook.com", "fb.watch", "fb.com")) return p.includes("/reel") ? "Facebook Reel" : "Facebook";
   if (is("spotify.com")) { const m = p.match(/\/(track|album|playlist|artist|episode)\//); return "Spotify " + (m ? m[1] : ""); }
+  if (/(^|\.)pinterest\./.test(h) || is("pin.it")) return h === "pin.it" || p.startsWith("/pin/") ? "Pinterest pin" : "Pinterest";
   const map = { "soundcloud.com": "SoundCloud", "vimeo.com": "Vimeo", "reddit.com": "Reddit", "redd.it": "Reddit", "pinterest.com": "Pinterest", "pin.it": "Pinterest", "threads.net": "Threads", "threads.com": "Threads", "linkedin.com": "LinkedIn", "snapchat.com": "Snapchat", "twitch.tv": "Twitch", "dailymotion.com": "Dailymotion", "tumblr.com": "Tumblr", "bandcamp.com": "Bandcamp", "bsky.app": "Bluesky", "imgur.com": "Imgur", "flickr.com": "Flickr" };
   for (const k in map) if (is(k)) return map[k];
   return h;
@@ -1203,7 +1204,7 @@ function renderPreview(T) {
   if (S.probeErr) { el.innerHTML = `<p class="msg err">${esc(S.probeErr)}</p>`; return; }
   const P = S.probe;
   if (!P) {
-    el.innerHTML = `<p class="empty">${T.upper ? "PASTE ANY LINK. REELS, POSTS, CAROUSELS, STORIES, TIKTOKS, YOUTUBE, X, SPOTIFY AND MORE." : "Paste a link from <b>Instagram</b>, <b>TikTok</b>, <b>YouTube</b>, <b>X</b>, <b>Facebook</b>, <b>Spotify</b>, <b>SoundCloud</b> and more. Reels, posts, carousels and stories all work."}</p>`;
+    el.innerHTML = `<p class="empty">${T.upper ? "PASTE ANY LINK. REELS, POSTS, CAROUSELS, STORIES, TIKTOKS, PINS, YOUTUBE, X, SPOTIFY OR ANY WEB PAGE." : "Paste a link from <b>Instagram</b>, <b>TikTok</b>, <b>YouTube</b>, <b>Pinterest</b>, <b>X</b>, <b>Facebook</b>, <b>Spotify</b> and more, or any web page. Reels, posts, pins, boards, carousels and stories all work."}</p>`;
     return;
   }
   const multi = P.items.length > 1;
@@ -1437,9 +1438,14 @@ function closeOnboarding() {
 
 // ============================================================ actions
 let probeSeq = 0, probeTimer;
-function normUrl(u) { u = u.trim(); if (!u) return ""; return /^https?:\/\//i.test(u) ? u : "https://" + u; }
+function pickUrl(raw) {
+  const t = String(raw || "").trim(); if (!t) return "";
+  const m = t.match(/https?:\/\/[^\s<>"']+/i) || t.match(/(?:^|\s)((?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*)/i);
+  return (m ? (m[1] || m[0]) : t).trim().replace(/[)\].,!?;:'"]+$/, "");
+}
+function normUrl(u) { u = pickUrl(u); if (!u) return ""; return /^https?:\/\//i.test(u) ? u : "https://" + u; }
 function setUrl(u, now) {
-  S.url = u.trim(); $("#link").value = S.url;
+  S.url = pickUrl(u); if ($("#link").value.trim() !== S.url) $("#link").value = S.url;
   S.probe = null; S.probeErr = ""; S.sel = new Set();
   clearTimeout(probeTimer);
   render();
@@ -1544,11 +1550,11 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if ($("#
 document.addEventListener("paste", (e) => {
   if (e.target && e.target.id === "link") return;
   const t = (e.clipboardData || window.clipboardData).getData("text");
-  if (t && detect(t.trim())) { e.preventDefault(); setUrl(t, true); Sound.unlock(); Sound.sfx("tap"); }
+  if (t && detect(pickUrl(t))) { e.preventDefault(); setUrl(t, true); Sound.unlock(); Sound.sfx("tap"); }
 });
 document.addEventListener("dragover", (e) => { e.preventDefault(); app.classList.add("dropping"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) app.classList.remove("dropping"); });
-document.addEventListener("drop", (e) => { e.preventDefault(); app.classList.remove("dropping"); const t = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"); if (t) setUrl(t.split(/\s+/)[0], true); });
+document.addEventListener("drop", (e) => { e.preventDefault(); app.classList.remove("dropping"); const t = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"); if (t) setUrl(t, true); });
 document.addEventListener("pointerdown", () => Sound.unlock(), { once: true });
 ["focus", "blur", "visibilitychange"].forEach((ev) => window.addEventListener(ev, () => Sound.tick()));
 window.addEventListener("resize", () => { fit(); if ($("#onboard").classList.contains("on")) sizePreviews(); });

@@ -219,6 +219,14 @@ function cookieBrowsers(): string[] {
 
 // ---------------------------------------------------------------- platform detection
 
+// The link inside whatever was pasted, so "Look at this https://pin.it/abc" works too.
+function pickUrl(raw: string): string {
+  const t = raw.trim();
+  const m = t.match(/https?:\/\/[^\s<>"']+/i) ?? t.match(/(?:^|\s)((?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*)/i);
+  const u = (m ? (m[1] ?? m[0]) : t).trim().replace(/[)\].,!?;:'"]+$/, "");
+  return /^https?:\/\//i.test(u) ? u : "https://" + u;
+}
+
 type Platform = { id: string; name: string; sub: string };
 function detect(raw: string): Platform {
   let u: URL;
@@ -241,7 +249,11 @@ function detect(raw: string): Platform {
   if (is("soundcloud.com")) return { id: "soundcloud", name: "SoundCloud", sub: p.includes("/sets/") ? "Playlist" : "Track" };
   if (is("vimeo.com")) return { id: "vimeo", name: "Vimeo", sub: "Video" };
   if (is("reddit.com", "redd.it")) return { id: "reddit", name: "Reddit", sub: "Post" };
-  if (is("pinterest.com", "pin.it") || /(^|\.)pinterest\./.test(h)) return { id: "pinterest", name: "Pinterest", sub: "Pin" };
+  if (is("pinterest.com", "pin.it") || /(^|\.)pinterest\./.test(h)) {
+    const seg = p.split("/").filter(Boolean);
+    const sub = h === "pin.it" || seg[0] === "pin" ? "Pin" : seg[0] === "search" ? "Search" : seg.length >= 2 ? "Board" : seg.length === 1 ? "Profile" : "Pin";
+    return { id: "pinterest", name: "Pinterest", sub };
+  }
   if (is("threads.net", "threads.com")) return { id: "threads", name: "Threads", sub: "Post" };
   if (is("linkedin.com")) return { id: "linkedin", name: "LinkedIn", sub: "Post" };
   if (is("snapchat.com")) return { id: "snapchat", name: "Snapchat", sub: "Spotlight" };
@@ -263,7 +275,7 @@ const RETRYABLE = /403|Forbidden|Sign in|sign-in|login|log in|not a bot|Requeste
 
 function friendly(raw: string): string {
   const r = raw || "";
-  if (/Unsupported URL|No suitable extractor|is not a valid URL|unsupported/i.test(r)) return "Pluck doesn't know this site yet, or the link isn't a post. Check it opens in your browser and copy it again.";
+  if (/Unsupported URL|No suitable extractor|is not a valid URL|unsupported/i.test(r)) return "Couldn't find a video or photo on that page. Check it opens in your browser, then copy the link to the post itself.";
   if (/DRM/i.test(r)) return "This one is protected (DRM), so it can't be saved.";
   if (/\b404\b|Not Found|does not exist|has been removed/i.test(r)) return "That page doesn't exist anymore, or it was taken down. Check the link and try again.";
   if (/429|rate.?limit|Too Many Requests/i.test(r)) return "The site is slowing Pluck down for a bit. Wait a few minutes and try again.";
@@ -279,7 +291,7 @@ function friendly(raw: string): string {
 
 // ---------------------------------------------------------------- probe
 
-type Item = { i: number; type: "photo" | "video" | "audio"; title?: string; thumb?: string; dur?: number; w?: number; h?: number; artist?: string; ytId?: string };
+type Item = { i: number; type: "photo" | "video" | "audio"; title?: string; thumb?: string; dur?: number; w?: number; h?: number; artist?: string; ytId?: string; src?: string };
 type Info = {
   url: string; platform: Platform; engine: "ytdlp" | "gallery" | "spotify"; kind: "video" | "audio" | "photo" | "gallery" | "music";
   title: string; author: string; thumb: string; duration: number; maxHeight: number; items: Item[]; album?: string; attempt: number; note?: string;
@@ -389,12 +401,13 @@ function galleryInfo(url: string, pf: Platform, files: { u: string; kw: any }[],
   const items: Item[] = files.map((f, i) => {
     const e = String(f.kw.extension ?? ext(f.u.split("?")[0]) ?? "").toLowerCase();
     const type = VIDEO_EXT.has(e) ? "video" : AUDIO_EXT.has(e) ? "audio" : "photo";
-    const thumb = type === "photo" ? f.u : (f.kw.display_url ?? f.kw.thumbnail ?? f.kw.preview ?? f.kw.image ?? f.kw.poster ?? "");
-    return { i, type, thumb: /^https?:/.test(thumb) ? thumb : "", dur: Number(f.kw.video_duration ?? f.kw.duration ?? 0) || 0, w: f.kw.width, h: f.kw.height };
+    const thumb = String(type === "photo" ? f.u : (f.kw.display_url ?? f.kw.thumbnail ?? f.kw.preview ?? f.kw.image ?? f.kw.poster ?? f.kw.images?.orig?.url ?? f.kw.images?.["736x"]?.url ?? ""));
+    return { i, type, thumb: /^https?:/.test(thumb) ? thumb : "", dur: Number(f.kw.video_duration ?? f.kw.duration ?? 0) || 0, w: f.kw.width, h: f.kw.height, src: f.u };
   });
   const k = files[0]?.kw ?? {};
-  const text = String(k.description ?? k.content ?? k.title ?? k.text ?? k.caption ?? "").replace(/\s+/g, " ").trim();
-  const author = String(k.username ?? k.owner_username ?? k.author?.name ?? k.author?.nick ?? k.user?.name ?? k.user?.screen_name ?? k.uploader ?? k.blog_name ?? k.blog?.name ?? "").trim();
+  const first = (...v: any[]) => String(v.find((x) => typeof x === "string" && x.trim()) ?? "");
+  const text = first(k.description, k.content, k.title, k.grid_title, k.og_title, k.text, k.caption).replace(/\s+/g, " ").trim();
+  const author = first(k.username, k.owner_username, k.pinner?.username, k.origin_pinner?.username, k.author?.name, k.author?.nick, k.user?.name, k.user?.screen_name, k.uploader, k.blog_name, k.blog?.name, k.og_site_name).trim();
   const fallback = pf.id === "web" && k.filename ? String(k.filename) : `${author ? author + " " : ""}${pf.name} ${pf.sub || "post"}`.trim();
   const title = text ? (text.length > 70 ? text.slice(0, 68).trim() + "..." : text) : fallback;
   const kind = items.length > 1 ? "gallery" : items[0].type === "photo" ? "photo" : items[0].type === "audio" ? "audio" : "video";
@@ -451,8 +464,101 @@ async function probe(url: string): Promise<Info> {
     try { return eng === "ytdlp" ? await probeYt(url, pf) : await probeGallery(url, pf); }
     catch (e) { const m = e instanceof Error ? e.message : String(e); if (!firstErr || /login|sign in|private|cookie|401|403/i.test(m)) firstErr = m; log("probe", eng, url, m.slice(0, 400)); }
   }
+  // Any other page: collect the photos and videos on it, so every link gives you something.
+  if (!/login|sign in|private|cookie|401|\b404\b|Not Found|getaddrinfo|resolve host|unreachable|DRM/i.test(firstErr)) {
+    try { return await probePage(url, pf); }
+    catch (e) { log("probe", "page", url, String(e).slice(0, 400)); }
+  }
   throw new Friendly(friendly(firstErr));
 }
+
+const JUNK = /favicon|sprite|logo|icon|avatar|emoji|badge|spacer|blank\.|pixel|placeholder|loader|spinner|tracking|1x1|gravatar|\.svg(\?|$)|\/ads?\//i;
+const unent = (t: string) => t.replace(/&(#x?[0-9a-f]+|amp|quot|apos|lt|gt|#39);/gi, (_, e: string) => {
+  const k = e.toLowerCase();
+  if (k[0] === "#") { const n = k[1] === "x" ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10); return Number.isFinite(n) ? String.fromCodePoint(n) : ""; }
+  return ({ amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" } as Record<string, string>)[k] ?? "";
+});
+const attrs = (tag: string) => {
+  const o: Record<string, string> = {};
+  for (const m of tag.matchAll(/([a-zA-Z_:][-\w:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g)) o[m[1].toLowerCase()] = unent(m[2] ?? m[3] ?? m[4] ?? "");
+  return o;
+};
+
+// Any web page: read it like a browser would and pick out its photos and videos, the page's own share image and video first.
+async function probePage(url: string, pf: Platform): Promise<Info> {
+  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9" }, signal: AbortSignal.timeout(30000) });
+  if (!res.ok) { await res.body?.cancel(); throw new Error(`HTTP Error ${res.status}`); }
+  if (!/html|xml/i.test(res.headers.get("content-type") ?? "")) { await res.body?.cancel(); throw new Error("not a web page"); }
+  const html = (await res.text()).slice(0, 5_000_000);
+  let base = res.url || url;
+  const b = html.match(/<base\s[^>]*href\s*=\s*["']?([^"' >]+)/i);
+  if (b) { try { base = new URL(unent(b[1]), base).href; } catch { /* keep */ } }
+  const abs = (u?: string) => { if (!u) return ""; try { const x = new URL(u.trim(), base); return /^https?:$/.test(x.protocol) ? x.href : ""; } catch { return ""; } };
+  const meta: Record<string, string> = {};
+  for (const m of html.matchAll(/<meta\s[^>]*>/gi)) { const a = attrs(m[0]); const k = (a.property ?? a.name ?? a.itemprop ?? "").toLowerCase(); if (k && a.content && !(k in meta)) meta[k] = a.content; }
+  const out: { u: string; type: "photo" | "video"; thumb?: string }[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | undefined, type: "photo" | "video", thumb?: string) => {
+    const u = abs(raw);
+    if (!u || JUNK.test(u)) return;
+    const key = u.replace(/[?#].*$/, "");
+    if (seen.has(key)) return;
+    seen.add(key); out.push({ u, type, thumb });
+  };
+  const kindOf = (u: string, hint: "photo" | "video") => { const e = ext(u.split(/[?#]/)[0]); return VIDEO_EXT.has(e) ? "video" : IMAGE_EXT.has(e) ? "photo" : hint; };
+  const ogImage = abs(meta["og:image:secure_url"] ?? meta["og:image"] ?? meta["og:image:url"] ?? meta["twitter:image"] ?? meta["twitter:image:src"]);
+  for (const k of ["og:video:secure_url", "og:video:url", "og:video", "twitter:player:stream"]) if (meta[k] && kindOf(meta[k], "photo") === "video") add(meta[k], "video", ogImage);
+  for (const m of html.matchAll(/<(video|source)\s[^>]*>/gi)) {
+    const a = attrs(m[0]); const src = a.src ?? a["data-src"];
+    if (src && (m[1].toLowerCase() === "video" || /video|mpegurl/i.test(a.type ?? "") || kindOf(src, "photo") === "video")) add(src, "video", abs(a.poster) || ogImage);
+  }
+  if (ogImage) add(ogImage, "photo");
+  for (const m of html.matchAll(/<img\s[^>]*>/gi)) {
+    const a = attrs(m[0]);
+    const w = parseInt(a.width ?? ""), h = parseInt(a.height ?? "");
+    if ((w && w < 120) || (h && h < 120)) continue;
+    const set = a.srcset ?? a["data-srcset"];
+    let best = "";
+    if (set) { let bw = -1; for (const part of set.split(/,\s+/)) { const [u, d] = part.trim().split(/\s+/); const n = parseFloat(d ?? "1") || 1; if (u && n > bw) { bw = n; best = u; } } }
+    add(best || a["data-src"] || a["data-original"] || a["data-lazy-src"] || a.src, "photo");
+  }
+  for (const m of html.matchAll(/<a\s[^>]*href\s*=\s*["']([^"']+\.(?:jpe?g|png|webp|gif|avif|mp4|webm|mov)(?:\?[^"']*)?)["']/gi)) { const u = unent(m[1]); add(u, kindOf(u, "photo")); }
+  if (!out.length) throw new Error("No media found");
+  const list = out.slice(0, 60);
+  const items: Item[] = list.map((x, i) => ({ i, type: x.type, thumb: x.type === "photo" ? x.u : (x.thumb ?? ""), src: "page:" + x.u }));
+  const titleTag = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "";
+  const title = unent(meta["og:title"] ?? meta["twitter:title"] ?? titleTag).replace(/\s+/g, " ").trim() || `Media from ${pf.name}`;
+  const kind = items.length > 1 ? "gallery" : items[0].type;
+  return {
+    url, platform: { ...pf, sub: "Page" }, engine: "gallery", kind, title: title.length > 70 ? title.slice(0, 68).trim() + "..." : title,
+    author: unent(meta["og:site_name"] ?? "").trim(), thumb: items.find((x) => x.thumb)?.thumb ?? "", duration: 0, maxHeight: 0, items, attempt: 0,
+  };
+}
+
+const IMG_TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif", "image/heic": "heic", "image/bmp": "bmp" };
+async function fetchDirect(j: Job, src: string, dir: string, n: number): Promise<string> {
+  const name = join(dir, `v${String(n).padStart(3, "0")}`);
+  if (src.startsWith("page:")) {
+    const u = src.slice(5);
+    if (kindOfUrl(u) !== "video") {
+      try {
+        const r = await fetch(u, { headers: { "User-Agent": UA, "Referer": j.url, "Accept": "image/avif,image/webp,image/*,*/*;q=0.8" }, signal: AbortSignal.timeout(120000) });
+        const ct = (r.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+        if (r.ok && (ct.startsWith("image/") || ct.startsWith("video/"))) {
+          const e = IMG_TYPES[ct] ?? (ext(u.split(/[?#]/)[0]) || ct.split("/")[1] || "bin");
+          await Deno.writeFile(`${name}.${e}`, new Uint8Array(await r.arrayBuffer()));
+          return "";
+        }
+        await r.body?.cancel();
+        if (!r.ok) return `HTTP Error ${r.status}`;
+      } catch (e) { return String(e); }
+    }
+    src = "ytdl:" + u;
+  }
+  const r = await run(ytdlp(), [...ytCommon(), "--no-playlist", "--referer", j.url, "-f", "bv*+ba/b", "--merge-output-format", "mp4", "-o", `${name}.%(ext)s`, "--", src.slice(5)], { job: j });
+  return r.code === 0 ? "" : (r.err || r.tail.join("\n"));
+}
+const kindOfUrl = (u: string) => { const e = ext(u.split(/[?#]/)[0]); return VIDEO_EXT.has(e) ? "video" : IMAGE_EXT.has(e) ? "photo" : "other"; };
 
 // ---------------------------------------------------------------- jobs
 
@@ -629,12 +735,24 @@ async function runGallery(j: Job) {
   const weight = post ? 0.7 : 1;
   const attempts = gdAttempts(j.info.platform.id);
   const order = [...attempts.slice(j.info.attempt), ...attempts.slice(0, j.info.attempt)];
+  // Some videos (Pinterest, for one) are streams that gallery-dl hands to yt-dlp. Pluck fetches those itself.
+  const streams = sel.filter((i) => /^(ytdl|page):/.test(j.info.items[i]?.src ?? ""));
+  const gsel = sel.filter((i) => !streams.includes(i));
   let files: string[] = [];
   let lastErr = "";
-  for (const at of order) {
+  for (let k = 0; k < streams.length; k++) {
+    if (j.canceled) return;
+    const i = streams[k];
+    j.item = k + 1; j.sub = j.info.items[i].type; broadcast();
+    const err = await fetchDirect(j, j.info.items[i].src!, dl, i + 1);
+    if (err) lastErr = err;
+    j.pct = ((k + 1) / sel.length) * weight * 100; broadcast();
+  }
+  const got = (await listFiles(dl)).length;
+  for (const at of gsel.length ? order : []) {
     if (j.canceled) return;
     let count = 0;
-    const r = await run(gallerydl(), [...at, "--range", sel.map((i) => i + 1).join(","), "-D", dl, "--", j.url], {
+    const r = await run(gallerydl(), [...at, "--range", gsel.map((i) => i + 1).join(","), "-D", dl, "--", j.info.url], {
       job: j,
       onLine: (l) => {
         if (l.startsWith(dl) || l.startsWith("# ") || l.includes(SEP + "dl" + SEP)) {
@@ -647,12 +765,13 @@ async function runGallery(j: Job) {
       },
     });
     files = await listFiles(dl);
-    if (files.length) break;
+    if (files.length > got) break;
     const isCookie = at[0] === "--cookies-from-browser";
     const err = r.err || r.tail.join("\n");
     if (!isCookie || !lastErr) lastErr = err;
     if (!RETRYABLE.test(err) && !isCookie) break;
   }
+  files = (await listFiles(dl)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   if (!files.length) throw new Error(lastErr || "No media found");
   const title = safeName(j.info.title, 80);
   const many = files.length > 1;
@@ -1456,8 +1575,7 @@ async function handle(req: Request): Promise<Response> {
   try {
     switch (path) {
       case "/api/probe": {
-        let u = String(body.url ?? "").trim();
-        if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+        let u = pickUrl(String(body.url ?? ""));
         try { new URL(u); } catch { throw new Friendly("That doesn't look like a link. Copy the full address and paste it again."); }
         if (setupRun) await setupRun;
         if (!have("ytdlp")) throw new Friendly("Pluck is still missing its download engine. Open Settings and choose Finish setup.");
@@ -1467,8 +1585,7 @@ async function handle(req: Request): Promise<Response> {
         return json(info);
       }
       case "/api/download": {
-        let u = String(body.url ?? "").trim();
-        if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+        let u = pickUrl(String(body.url ?? ""));
         let info = probeCache.get(u);
         if (!info) { info = await probe(u); probeCache.set(u, info); }
         const j: Job = {

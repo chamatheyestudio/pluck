@@ -27,6 +27,9 @@ FF="$ROOT/bin/ffmpeg"; [ -x "$FF" ] || FF="$ROOT/bin/ffmpeg.exe"; [ -x "$FF" ] |
 MEDIA="$(mktemp -d)"
 "$FF" -loglevel error -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 -t 4 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$MEDIA/clip.mp4"
 "$FF" -loglevel error -f lavfi -i testsrc2=size=800x800 -frames:v 1 "$MEDIA/pic.jpg"
+"$FF" -loglevel error -f lavfi -i testsrc=size=900x600 -frames:v 1 "$MEDIA/pic2.jpg"
+"$FF" -loglevel error -f lavfi -i color=c=black:size=32x32 -frames:v 1 "$MEDIA/logo.png"
+printf '<html><head><title>Test page</title></head><body><img src="logo.png"><h1>Hello</h1><img src="pic.jpg"><p>Words</p><img src="/pic2.jpg"></body></html>' > "$MEDIA/page.html"
 (cd "$MEDIA" && "$PY" -m http.server 8765 --bind 127.0.0.1 > /dev/null 2>&1 &)
 sleep 3
 
@@ -40,6 +43,32 @@ done
 state | py 'import json,sys
 for j in json.load(sys.stdin)["jobs"]: print(j["status"], j["mode"], j["files"], j.get("error") or "")'
 case "$r" in *error*|*running*|*queued*) echo "::error::downloads did not finish: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
+
+echo "Any web page: photos on a plain page"
+p=$(curl -sf "${H[@]}" -d '{"url":"Look at this http://127.0.0.1:8765/page.html"}' "$API/api/probe" | py 'import json,sys; d=json.load(sys.stdin); print(d["engine"], d["kind"], len(d["items"]), d["title"])')
+echo "$p"
+case "$p" in "gallery gallery 2 "*) ;; *) echo "::error::web page probe gave: $p"; cat "$ROOT/pluck.log"; exit 1 ;; esac
+curl -sf "${H[@]}" -d '{"url":"http://127.0.0.1:8765/page.html","mode":"photos"}' "$API/api/download" > /dev/null
+for i in $(seq 1 30); do
+  r=$(state | py 'import json,sys; j=json.load(sys.stdin)["jobs"][0]; print(j["status"], len(j["files"]), j.get("error") or "")')
+  case "$r" in running*|queued*) sleep 2 ;; *) break ;; esac
+done
+echo "page: $r"
+case "$r" in "done 2"*) ;; *) echo "::error::web page download gave: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
+
+# Live sites can block CI machines, so these only warn.
+for u in https://www.pinterest.com/pin/664281013778109217/ https://www.pinterest.com/pin/1084663891475263837/; do
+  p=$(curl -s "${H[@]}" -d "{\"url\":\"$u\"}" "$API/api/probe" | py 'import json,sys; d=json.load(sys.stdin); print(d.get("error") or "%s %s %s %s" % (d["engine"], d["kind"], [i["type"] for i in d["items"]], d["title"][:40]))' || true)
+  echo "Pinterest $u: $p"
+  case "$p" in gallery*|ytdlp*) ;; *) echo "::warning::Pinterest probe: $p"; continue ;; esac
+  curl -sf "${H[@]}" -d "{\"url\":\"$u\",\"mode\":\"video\"}" "$API/api/download" > /dev/null || true
+  for i in $(seq 1 60); do
+    r=$(state | py 'import json,sys; j=json.load(sys.stdin)["jobs"][0]; print(j["status"], j["files"], j.get("error") or "")')
+    case "$r" in running*|queued*) sleep 2 ;; *) break ;; esac
+  done
+  echo "  download: $r"
+  case "$r" in done*) ;; *) echo "::warning::Pinterest download: $r" ;; esac
+done
 
 if [ -n "${PLUCK_FEED:-}" ]; then
   echo "Testing an update to 99.0.0"
