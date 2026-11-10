@@ -92,6 +92,18 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(360px,440px) 
 .pill{height:34px;padding:0 13px;border-radius:var(--pill-radius);border:var(--pill-border);background:transparent;color:var(--muted);font:500 12px var(--mono);cursor:pointer}
 .pill[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .pill:disabled{opacity:.3;cursor:default}
+.cut{margin-top:12px;display:flex;flex-direction:column;gap:10px}
+.cutTrack{position:relative;height:22px}
+.cutTrack::before{content:"";position:absolute;left:0;right:0;top:9px;height:4px;border-radius:2px;background:var(--muted);opacity:.25}
+.cutTrack i{position:absolute;top:9px;height:4px;border-radius:2px;background:var(--accent)}
+.cutTrack input{position:absolute;inset:0;width:100%;margin:0;background:transparent;pointer-events:none;-webkit-appearance:none;appearance:none}
+.cutTrack input::-webkit-slider-runnable-track{background:transparent;height:22px}
+.cutTrack input::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;width:18px;height:18px;margin-top:2px;border-radius:50%;background:var(--accent);border:2px solid var(--bg,#000);box-shadow:0 1px 4px rgba(0,0,0,.45);cursor:grab}
+.cutTimes{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cutTimes label{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.tm{width:84px;height:34px;padding:0 8px;border-radius:var(--pill-radius);border:var(--pill-border);background:var(--field-bg);color:var(--fg);font:500 13px var(--mono);text-align:center;outline:0}
+.tm:focus{border-color:var(--accent)}
+.tm.bad{border-color:var(--err,#FF7A6B)}
 .saveto{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 6px 0 12px;border:var(--saveto-border);border-radius:var(--field-radius)}
 .saveto .pth{flex:1;min-width:0;font:400 13px var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #go{flex:none;height:62px;border:0;border-radius:var(--go-radius);background:var(--go-bg);color:var(--go-fg);font:var(--go-font);letter-spacing:var(--go-ls,0);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px;box-shadow:var(--go-shadow,none);transition:transform .08s,filter .2s}
@@ -631,6 +643,13 @@ footer .fl{overflow:hidden;text-overflow:ellipsis}
       </div>
       <div id="qualWrap">
         <div class="row" style="justify-content:flex-start;gap:14px"><span class="lbl" id="lblQuality" style="min-width:64px">Quality</span><div class="pills" id="pills" role="group" aria-labelledby="lblQuality"></div></div>
+      </div>
+      <div id="partWrap" hidden>
+        <div class="row" style="justify-content:flex-start;gap:14px"><span class="lbl" id="lblPart" style="min-width:64px">Length</span><div class="pills" id="partPills" role="group" aria-labelledby="lblPart"><button type="button" class="pill" data-part="0">Whole thing</button><button type="button" class="pill" data-part="1">Just a part</button></div></div>
+        <div class="cut" id="cut" hidden>
+          <div class="cutTrack" id="cutTrack"><i id="cutFill"></i><input type="range" id="cutA" min="0" step="1" aria-label="Start"><input type="range" id="cutB" min="0" step="1" aria-label="End"></div>
+          <div class="cutTimes"><label>From <input class="tm" id="cutFrom" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="0:00"></label><label>To <input class="tm" id="cutTo" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="end"></label><span class="hint" id="cutLen"></span></div>
+        </div>
       </div>
       <div class="saveto">
         <span class="lbl" id="lblSaveTo">Save to</span>
@@ -1235,6 +1254,7 @@ function renderModes(T) {
   el.innerHTML = list.map((m) => `<button type="button" class="mode" data-m="${m[0]}" aria-pressed="${S.mode === m[0]}"><b>${esc(T.upper ? m[1].toUpperCase() : m[1])}</b><small>${esc(m[2])}</small></button>`).join("");
   const showQ = (!S.probe || S.probe.engine === "ytdlp") && ["video", "split", "orig"].includes(S.mode) && (!S.probe || S.probe.kind !== "audio");
   $("#qualWrap").style.display = showQ ? "" : "none";
+  renderPart(T);
   const maxH = S.probe ? S.probe.maxHeight || 0 : 0;
   $("#pills").innerHTML = [["best", "Best"], ["4k", "4K"], ["1080", "1080p"], ["720", "720p"]].map((q) => {
     const h = q[0] === "4k" ? 2160 : Number(q[0]) || 0;
@@ -1242,6 +1262,52 @@ function renderModes(T) {
     if (off && S.quality === q[0]) S.quality = "best";
     return `<button type="button" class="pill" data-q="${q[0]}" aria-pressed="${S.quality === q[0]}" ${off ? "disabled" : ""}>${q[1]}</button>`;
   }).join("");
+}
+
+// ---- "Just a part"
+function parseT(v) {
+  v = String(v || "").trim().replace(/[^\d:.]/g, ""); if (!v) return null;
+  const p = v.split(":").map(Number); if (p.some((x) => !Number.isFinite(x))) return NaN;
+  return p.reduce((a, x) => a * 60 + x, 0);
+}
+function fmtT(x) { x = Math.max(0, Math.round(x || 0)); const h = Math.floor(x / 3600), m = Math.floor((x % 3600) / 60), s = x % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s).padStart(2, "0"); }
+function canCut(P) {
+  if (!P || P.engine === "spotify" || P.items.length !== 1) return false;
+  const t = P.items[0].type;
+  return (t === "video" || t === "audio") && !["cover", "photos"].includes(S.mode);
+}
+function renderPart(T) {
+  const P = S.probe, show = canCut(P);
+  $("#partWrap").hidden = !show;
+  if (!show) return;
+  $("#lblPart").textContent = T.upper ? "LENGTH" : "Length";
+  $$("#partPills .pill").forEach((b) => b.setAttribute("aria-pressed", String(!!S.part === (b.dataset.part === "1"))));
+  $("#cut").hidden = !S.part;
+  const dur = Math.floor(P.duration || P.items[0].dur || 0);
+  $("#cutTrack").hidden = !dur;
+  const key = P.url + "|" + dur;
+  if (S.cutKey !== key) {
+    S.cutKey = key;
+    for (const id of ["#cutA", "#cutB"]) { $(id).max = dur; $(id).step = dur > 600 ? 1 : 0.5; }
+    syncCut(true);
+  }
+}
+function syncCut(fromState) {
+  const dur = Math.floor((S.probe && (S.probe.duration || S.probe.items[0].dur)) || 0);
+  const a = $("#cutA"), b = $("#cutB");
+  if (fromState) {
+    a.value = S.cutFrom || 0; b.value = S.cutTo == null ? dur : S.cutTo;
+    $("#cutFrom").value = fmtT(S.cutFrom || 0); $("#cutTo").value = S.cutTo == null ? (dur ? fmtT(dur) : "") : fmtT(S.cutTo);
+  }
+  if (dur) { const l = (S.cutFrom || 0) / dur * 100, r = (S.cutTo == null ? dur : S.cutTo) / dur * 100; $("#cutFill").style.left = l + "%"; $("#cutFill").style.width = Math.max(0, r - l) + "%"; }
+  const len = (S.cutTo == null ? dur : S.cutTo) - (S.cutFrom || 0);
+  $("#cutLen").textContent = (S.cutTo != null || dur) ? (len > 0 ? fmtT(len) + " long" : "End has to be after the start") : "To the end";
+  $("#cutFrom").classList.toggle("bad", len <= 0 && (S.cutTo != null || !!dur));
+  $("#cutTo").classList.toggle("bad", len <= 0 && (S.cutTo != null || !!dur));
+}
+function cutForDownload() {
+  if (!S.part || !canCut(S.probe)) return null;
+  return { from: S.cutFrom || 0, to: S.cutTo };
 }
 
 function renderQueue(T) {
@@ -1255,7 +1321,7 @@ function renderQueue(T) {
     return j.error;
   };
   $("#queue").innerHTML = list.map((j) => `<div class="qr"><span class="qt" style="${j.thumb ? `background-image:url('${thumbUrl(j.thumb)}')` : ""}"></span>
-    <div class="qx"><b>${esc(j.title)}</b><small class="${j.status === "error" ? "err" : ""}">${esc(j.platform ? j.platform.name : "")} · ${esc(statusText(j))}</small>${j.status === "running" ? `<div class="qb"><i style="width:${j.pct}%"></i></div>` : ""}</div>
+    <div class="qx"><b>${esc(j.title)}</b><small class="${j.status === "error" ? "err" : ""}">${esc(j.platform ? j.platform.name : "")}${j.cut ? " · " + esc(j.cut.replace(/(\d+)m(\d+)s/g, (_, m, x) => m + ":" + x).replace(/(\d+)h(\d+):/g, "$1:$2:")) : ""} · ${esc(statusText(j))}</small>${j.status === "running" ? `<div class="qb"><i style="width:${j.pct}%"></i></div>` : ""}</div>
     ${j.status === "done" ? `<button class="btn sm" data-act="reveal" data-id="${j.id}" type="button">Show</button>` : j.status === "error" || j.status === "canceled" ? `<button class="btn sm" data-act="retry" data-id="${j.id}" type="button">Retry</button>` : `<button class="btn sm" data-act="cancel" data-id="${j.id}" type="button">Cancel</button>`}</div>`).join("");
 }
 
@@ -1446,7 +1512,7 @@ function pickUrl(raw) {
 function normUrl(u) { u = pickUrl(u); if (!u) return ""; return /^https?:\/\//i.test(u) ? u : "https://" + u; }
 function setUrl(u, now) {
   S.url = pickUrl(u); if ($("#link").value.trim() !== S.url) $("#link").value = S.url;
-  S.probe = null; S.probeErr = ""; S.sel = new Set();
+  S.probe = null; S.probeErr = ""; S.sel = new Set(); S.part = false; S.cutFrom = 0; S.cutTo = null; S.cutKey = "";
   clearTimeout(probeTimer);
   render();
   if (S.url && detect(S.url)) probeTimer = setTimeout(doProbe, now ? 0 : 450);
@@ -1475,7 +1541,9 @@ async function go() {
   let dir;
   if (S.settings.askEachTime) { const r = await api.post("/api/pick-folder").catch(() => ({})); if (!r.path) return; dir = r.path; }
   try {
-    const j = await api.post("/api/download", { url: normUrl(S.url), mode: S.mode, quality: S.quality, select: S.probe.items.length > 1 ? items.map((i) => i.i) : [], dir });
+    const cut = cutForDownload();
+    if (cut) { const dur = S.probe.duration || S.probe.items[0].dur || 0; if ((cut.to == null ? dur : cut.to) - cut.from <= 0 && (cut.to != null || dur)) { toast("The end has to come after the start."); Sound.sfx("error"); return; } }
+    const j = await api.post("/api/download", { url: normUrl(S.url), mode: S.mode, quality: S.quality, select: S.probe.items.length > 1 ? items.map((i) => i.i) : [], dir, cut });
     S.focusId = j.id; Sound.sfx("start");
     S.jobs = [j, ...S.jobs.filter((x) => x.id !== j.id)];
     S.url = ""; $("#link").value = ""; S.probe = null; S.sel = new Set();
@@ -1508,6 +1576,7 @@ document.addEventListener("click", async (e) => {
   if (b.id === "newsOk") { $("#news").classList.remove("on"); Sound.sfx("tap"); S.settings.lastVersion = S.version; api.post("/api/settings", { lastVersion: S.version }).catch(() => {}); return; }
   if (b.id === "upd") { Sound.sfx("tap"); if ((S.app || {}).state === "ready") restartNow(); else api.post("/api/open-url", { url: S.app.url }).catch((er) => toast(er.message)); return; }
   if (b.classList.contains("mode")) { S.mode = b.dataset.m; Sound.sfx("tap"); render(); return; }
+  if (b.dataset.part) { S.part = b.dataset.part === "1"; Sound.sfx("tap"); render(); if (S.part) syncCut(true); return; }
   if (b.classList.contains("pill")) { S.quality = b.dataset.q; Sound.sfx("tap"); render(); return; }
   if (b.classList.contains("tile") || b.classList.contains("trk")) { const i = Number(b.dataset.i); S.sel.has(i) ? S.sel.delete(i) : S.sel.add(i); Sound.sfx("tap"); render(); return; }
   if (b.id === "btnSelAll") { const all = S.sel.size === S.probe.items.length; S.sel = new Set(all ? [] : S.probe.items.map((i) => i.i)); Sound.sfx("tap"); render(); return; }
@@ -1545,6 +1614,24 @@ $("#btnCloseSettings").addEventListener("click", () => openSettings(false));
 $("#scrim").addEventListener("click", () => openSettings(false));
 $("#btnClear").addEventListener("click", () => api.post("/api/clear").catch(() => {}));
 $("#link").addEventListener("input", (e) => setUrl(e.target.value));
+for (const id of ["#cutA", "#cutB"]) $(id).addEventListener("input", () => {
+  const dur = Number($("#cutA").max) || 0;
+  let a = Number($("#cutA").value), b = Number($("#cutB").value);
+  if (a > b - 1) { if (id === "#cutA") a = Math.max(0, b - 1); else b = Math.min(dur, a + 1); $("#cutA").value = a; $("#cutB").value = b; }
+  S.cutFrom = a; S.cutTo = b >= dur ? null : b;
+  $("#cutFrom").value = fmtT(a); $("#cutTo").value = fmtT(b); syncCut(false);
+});
+for (const id of ["#cutFrom", "#cutTo"]) {
+  $(id).addEventListener("input", () => {
+    const v = parseT($(id).value);
+    if (Number.isNaN(v)) return;
+    if (id === "#cutFrom") S.cutFrom = v || 0; else S.cutTo = v;
+    $("#cutA").value = S.cutFrom || 0; if (S.cutTo != null) $("#cutB").value = S.cutTo;
+    syncCut(false);
+  });
+  $(id).addEventListener("change", () => syncCut(true));
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $(id).blur(); } });
+}
 $("#link").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (S.probe) go(); else { clearTimeout(probeTimer); doProbe(); } } });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { if ($("#news").classList.contains("on")) $("#newsOk").click(); else if ($("#settings").classList.contains("on")) openSettings(false); } });
 document.addEventListener("paste", (e) => {

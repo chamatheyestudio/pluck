@@ -562,12 +562,30 @@ const kindOfUrl = (u: string) => { const e = ext(u.split(/[?#]/)[0]); return VID
 
 // ---------------------------------------------------------------- jobs
 
+function parseCut(c: any, info: Info): Cut | undefined {
+  if (!c || typeof c !== "object" || info.engine === "spotify") return undefined;
+  const from = Math.max(0, Number(c.from) || 0);
+  let to: number | null = c.to == null || c.to === "" ? null : Number(c.to);
+  if (to != null && !Number.isFinite(to)) to = null;
+  if (to != null && info.duration && to >= info.duration - 0.25) to = null;
+  if (to != null && to <= from + 0.2) throw new Friendly("The end has to come after the start. Check the times and try again.");
+  if (info.duration && from >= info.duration) throw new Friendly("The start is past the end of this one. Check the times and try again.");
+  if (from < 0.05 && to == null) return undefined;
+  return { from: Math.round(from * 100) / 100, to: to == null ? null : Math.round(to * 100) / 100 };
+}
+
 type Job = {
   id: string; url: string; info: Info; mode: string; quality: string; select: number[]; dir?: string;
   status: "queued" | "running" | "done" | "error" | "canceled"; phase: string; sub: string; pct: number; speed: string; eta: string;
   item: number; items: number; files: string[]; folder: string; error: string; warn: string; created: number; endedAt: number;
-  procs: Set<Deno.ChildProcess>; canceled: boolean; tmp: string;
+  procs: Set<Deno.ChildProcess>; canceled: boolean; tmp: string; cut?: Cut; cutLater?: boolean;
 };
+// "Just a part": seconds from the start; to = null means until the end.
+type Cut = { from: number; to: number | null };
+const tlabel = (x: number) => { const t = Math.round(x), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60; return (h ? `${h}h${String(m).padStart(2, "0")}m` : `${m}m`) + `${String(sec).padStart(2, "0")}s`; };
+const cutLabel = (c: Cut) => `${tlabel(c.from)} to ${c.to == null ? "end" : tlabel(c.to)}`;
+const cutIn = (c?: Cut) => c ? ["-ss", String(c.from), ...(c.to != null ? ["-to", String(c.to)] : [])] : [];
+const cutLen = (c: Cut | undefined, dur: number) => c ? Math.max(0.1, (c.to ?? dur) - c.from) : dur;
 const jobs: Job[] = [];
 const MAX_PARALLEL = 2;
 
@@ -576,6 +594,7 @@ function publicJob(j: Job) {
     id: j.id, url: j.url, title: j.info.title, author: j.info.author, thumb: j.info.thumb, platform: j.info.platform, kind: j.info.kind,
     mode: j.mode, status: j.status, phase: j.phase, sub: j.sub, pct: Math.round(j.pct * 10) / 10, speed: j.speed, eta: j.eta,
     item: j.item, items: j.items, files: j.files, folder: j.folder, error: j.error, warn: j.warn, created: j.created, endedAt: j.endedAt,
+    cut: j.cut ? cutLabel(j.cut) : "",
   };
 }
 
@@ -601,6 +620,14 @@ async function runJob(j: Job) {
     else await runYt(j);
     if (j.canceled) throw new Error("canceled");
     if (!j.files.length) throw new Error(j.error || "Nothing was saved.");
+    if (j.cut) {
+      for (let k = 0; k < j.files.length; k++) {
+        const f = j.files[k], e = ext(f);
+        if (!VIDEO_EXT.has(e) && !AUDIO_EXT.has(e) && e !== "wav") continue;
+        const d = uniquePath(f.slice(0, f.length - base(f).length).replace(/[\\/]+$/, ""), `${stem(f)} (${cutLabel(j.cut)})`, e);
+        try { await Deno.rename(f, d); j.files[k] = d; } catch { /* keep the name */ }
+      }
+    }
     setP(j, { status: "done", pct: 100, phase: "finish", endedAt: Date.now() });
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
@@ -655,8 +682,9 @@ async function ytDownload(j: Job, url: string, extra: string[], dir: string, mul
     if (j.canceled) break;
     try { await Deno.writeTextFile(paths, ""); } catch { /* ignore */ }
     const st = { dest: 0, item: 1, n: multi ? Math.max(1, j.select.length || j.info.items.length) : 1, both: !audioOnly && !extra.includes("--skip-download"), weight };
+    const part = j.cut && !j.cutLater && !extra.includes("--skip-download") ? ["--download-sections", `*${j.cut.from}-${j.cut.to ?? "inf"}`, "--force-keyframes-at-cuts"] : [];
     const args = [
-      ...ytCommon(), ...at, "--newline", "--no-mtime", "--retries", "10", "--fragment-retries", "10", "--concurrent-fragments", "4",
+      ...ytCommon(), ...at, ...part, "--newline", "--no-mtime", "--retries", "10", "--fragment-retries", "10", "--concurrent-fragments", "4",
       "--progress-template", "download:PCT %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
       "-o", multi ? "%(playlist_index|0)03d %(title).110B [%(id)s].%(ext)s" : "%(title).150B [%(id)s].%(ext)s",
       "-P", dir, "-P", `temp:${dir}`, "--print-to-file", "after_move:filepath", paths,
@@ -688,8 +716,22 @@ async function runYt(j: Job) {
   broadcast();
   let files: string[] = [];
   try { files = await ytDownload(j, j.url, ytFormat(j.mode, j.quality), dl, multi, weight); }
-  catch (e) { if (j.mode === "cover") throw new Friendly("There's no cover image for this one."); throw e; }
-  const clean = (f: string) => stem(f).replace(/\s\[[^\]]+\]$/, "");
+  catch (e) {
+    if (j.mode === "cover") throw new Friendly("There's no cover image for this one.");
+    if (!j.cut || j.cutLater || j.canceled) throw e;
+    // Some sites can't send just a part. Fetch the whole thing and cut it here instead.
+    log("part download failed, cutting after", String(e).slice(0, 300));
+    j.cutLater = true; j.pct = 0; broadcast();
+    files = await ytDownload(j, j.url, ytFormat(j.mode, j.quality), dl, multi, weight);
+  }
+  const later = j.cutLater ? j.cut : undefined;
+  if (later && !needsPost) {
+    j.phase = "encode"; broadcast();
+    const cutted: string[] = [];
+    for (const f of files) cutted.push(await cutFile(j, f, later));
+    files = cutted;
+  }
+  const clean = (f: string) => stem(f).replace(/\.part-cut$/, "").replace(/\s\[[^\]]+\]$/, "");
   if (!needsPost) {
     for (const f of files) { const d = uniquePath(j.folder, safeName(clean(f)), ext(f)); await moveFile(f, d); j.files.push(d); }
     return;
@@ -712,16 +754,16 @@ async function runYt(j: Job) {
       setP(j, { phase: "encode", sub: "video" });
     }
     const name = safeName(clean(f));
-    if (!pi.v) { const d = uniquePath(j.folder, name, ext(f)); await moveFile(f, d); j.files.push(d); continue; }
+    if (!pi.v) { const src = later ? await cutFile(j, f, later) : f; const d = uniquePath(j.folder, name, ext(src)); await moveFile(src, d); j.files.push(d); continue; }
     if (j.mode === "video") {
       const d = uniquePath(j.folder, name, "mp4");
-      if (await editReady(j, f, audio, true, d, onPct)) j.files.push(d);
+      if (await editReady(j, f, audio, true, d, onPct, later)) j.files.push(d);
       else { const o = uniquePath(j.folder, name, ext(f)); await moveFile(f, o); j.files.push(o); j.warn = "Couldn't convert to MP4, so Pluck saved the original file."; }
     } else {
       const dv = uniquePath(j.folder, name + " (video)", "mp4");
-      if (await editReady(j, f, null, false, dv, (x) => onPct(x * 0.7))) j.files.push(dv);
+      if (await editReady(j, f, null, false, dv, (x) => onPct(x * 0.7), later)) j.files.push(dv);
       const asrc = audio ?? (pi.a ? f : null);
-      if (asrc) { const da = uniquePath(j.folder, name + " (audio)", "wav"); j.phase = "encode"; j.sub = "audio"; if (await toAudio(j, asrc, da, "wav", (x) => onPct(0.7 + x * 0.3))) j.files.push(da); }
+      if (asrc) { const da = uniquePath(j.folder, name + " (audio)", "wav"); j.phase = "encode"; j.sub = "audio"; if (await toAudio(j, asrc, da, "wav", (x) => onPct(0.7 + x * 0.3), later)) j.files.push(da); }
     }
   }
 }
@@ -783,6 +825,13 @@ async function runGallery(j: Job) {
     const name = many ? `${title} ${String(k + 1).padStart(2, "0")}` : title;
     j.item = k + 1;
     const onPct = (x: number) => { j.pct = (weight + (1 - weight) * ((k + x) / files.length)) * 100; broadcast(); };
+    const cut = isVid ? j.cut : undefined;
+    if (cut && j.mode === "orig") {
+      setP(j, { phase: "encode", sub: "video" });
+      const d = uniquePath(j.folder, name, "mp4");
+      if (await editReady(j, f, null, true, d, onPct, cut)) j.files.push(d);
+      continue;
+    }
     if (j.mode === "orig" || (!isVid && j.mode !== "mp3")) {
       if (!isVid && (e === "webp" || e === "heic") && j.mode !== "orig") {
         const d = uniquePath(j.folder, name, "jpg");
@@ -793,16 +842,16 @@ async function runGallery(j: Job) {
     }
     if (!isVid) continue;
     setP(j, { phase: "encode", sub: "video" });
-    if (j.mode === "mp3") { const d = uniquePath(j.folder, name, "mp3"); if (await toAudio(j, f, d, "mp3", onPct)) j.files.push(d); continue; }
+    if (j.mode === "mp3") { const d = uniquePath(j.folder, name, "mp3"); if (await toAudio(j, f, d, "mp3", onPct, cut)) j.files.push(d); continue; }
     if (j.mode === "split") {
       const dv = uniquePath(j.folder, name + " (video)", "mp4");
-      if (await editReady(j, f, null, false, dv, (x) => onPct(x * 0.7))) j.files.push(dv);
+      if (await editReady(j, f, null, false, dv, (x) => onPct(x * 0.7), cut)) j.files.push(dv);
       const pi = await ffprobe(f);
-      if (pi.a) { const da = uniquePath(j.folder, name + " (audio)", "wav"); if (await toAudio(j, f, da, "wav", (x) => onPct(0.7 + x * 0.3))) j.files.push(da); }
+      if (pi.a) { const da = uniquePath(j.folder, name + " (audio)", "wav"); if (await toAudio(j, f, da, "wav", (x) => onPct(0.7 + x * 0.3), cut)) j.files.push(da); }
       continue;
     }
     const d = uniquePath(j.folder, name, "mp4");
-    if (await editReady(j, f, null, true, d, onPct)) j.files.push(d);
+    if (await editReady(j, f, null, true, d, onPct, cut)) j.files.push(d);
     else { const o = uniquePath(j.folder, name, e); await moveFile(f, o); j.files.push(o); }
   }
 }
@@ -908,10 +957,10 @@ function videoEncoders(height: number): string[][] {
   return [...hw, ["-c:v", "libx264", "-preset", "fast", "-crf", "17", "-pix_fmt", "yuv420p"]];
 }
 
-async function editReady(j: Job, src: string, audioSrc: string | null, withAudio: boolean, dest: string, onPct: (x: number) => void): Promise<boolean> {
+async function editReady(j: Job, src: string, audioSrc: string | null, withAudio: boolean, dest: string, onPct: (x: number) => void, cut?: Cut): Promise<boolean> {
   const pi = await ffprobe(src);
   if (!pi.v) return false;
-  const inputs = ["-i", src];
+  const inputs = [...cutIn(cut), "-i", src];
   const maps = ["-map", "0:v:0"];
   let aArgs = ["-an"];
   if (withAudio) {
@@ -919,26 +968,44 @@ async function editReady(j: Job, src: string, audioSrc: string | null, withAudio
     if (as) {
       const ai = as === src ? pi : await ffprobe(as);
       if (ai.a) {
-        if (as !== src) { inputs.push("-i", as); maps.push("-map", "1:a:0"); } else maps.push("-map", "0:a:0");
+        if (as !== src) { inputs.push(...cutIn(cut), "-i", as); maps.push("-map", "1:a:0"); } else maps.push("-map", "0:a:0");
         aArgs = ai.a.codec === "aac" ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "320k"];
       }
     }
   }
+  if (cut && aArgs[1] === "copy") aArgs = ["-c:a", "aac", "-b:a", "320k"];
   const tries: string[][] = [];
-  if (pi.v.codec === "h264") tries.push(["-c:v", "copy"]);
-  if (pi.v.codec === "hevc") tries.push(["-c:v", "copy", "-tag:v", "hvc1"]);
+  if (!cut && pi.v.codec === "h264") tries.push(["-c:v", "copy"]);
+  if (!cut && pi.v.codec === "hevc") tries.push(["-c:v", "copy", "-tag:v", "hvc1"]);
   tries.push(...videoEncoders(pi.v.height));
   for (const v of tries) {
     if (j.canceled) return false;
-    if (await ffmpegRun(j, [...inputs, ...maps, ...v, ...aArgs, "-movflags", "+faststart", dest], pi.dur, onPct)) return true;
+    if (await ffmpegRun(j, [...inputs, ...maps, ...v, ...aArgs, "-movflags", "+faststart", dest], cutLen(cut, pi.dur), onPct)) return true;
   }
   return false;
 }
 
-async function toAudio(j: Job, src: string, dest: string, fmt: "wav" | "mp3", onPct: (x: number) => void): Promise<boolean> {
+// Cut a finished file to the part asked for. Keeps the format when it can; video comes out as MP4.
+async function cutFile(j: Job, f: string, cut: Cut): Promise<string> {
+  const pi = await ffprobe(f);
+  const e = ext(f);
+  const out = f.replace(/\.[^.\\/]+$/, "") + ".part-cut";
+  if (pi.v && VIDEO_EXT.has(e)) {
+    const d = out + ".mp4";
+    if (await editReady(j, f, null, true, d, () => {}, cut)) return d;
+    return f;
+  }
+  if (!pi.a) return f;
+  const codec: Record<string, string[]> = { mp3: ["-c:a", "libmp3lame", "-q:a", "0"], wav: ["-c:a", "pcm_s16le"], flac: ["-c:a", "flac"], opus: ["-c:a", "libopus", "-b:a", "192k"], ogg: ["-c:a", "libvorbis", "-q:a", "8"] };
+  const d = `${out}.${codec[e] ? e : "m4a"}`;
+  if (await ffmpegRun(j, [...cutIn(cut), "-i", f, "-map", "0:a:0", "-vn", ...(codec[e] ?? ["-c:a", "aac", "-b:a", "320k"]), d], cutLen(cut, pi.dur), () => {})) return d;
+  return f;
+}
+
+async function toAudio(j: Job, src: string, dest: string, fmt: "wav" | "mp3", onPct: (x: number) => void, cut?: Cut): Promise<boolean> {
   const pi = await ffprobe(src);
   const codec = fmt === "wav" ? ["-c:a", "pcm_s16le", "-ar", "48000"] : ["-c:a", "libmp3lame", "-q:a", "0"];
-  return await ffmpegRun(j, ["-i", src, "-map", "0:a:0", "-vn", ...codec, dest], pi.dur, onPct);
+  return await ffmpegRun(j, [...cutIn(cut), "-i", src, "-map", "0:a:0", "-vn", ...codec, dest], cutLen(cut, pi.dur), onPct);
 }
 
 // ---------------------------------------------------------------- downloads and archives
@@ -1592,6 +1659,7 @@ async function handle(req: Request): Promise<Response> {
           id: uid(), url: u, info, mode: String(body.mode ?? "video"), quality: String(body.quality ?? "best"),
           select: Array.isArray(body.select) ? body.select.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n < info!.items.length) : [],
           dir: body.dir ? String(body.dir) : undefined,
+          cut: parseCut(body.cut, info),
           status: "queued", phase: "queued", sub: "", pct: 0, speed: "", eta: "", item: 0, items: 0, files: [], folder: "", error: "", warn: "",
           created: Date.now(), endedAt: 0, procs: new Set(), canceled: false, tmp: "",
         };

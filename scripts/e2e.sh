@@ -44,6 +44,26 @@ state | py 'import json,sys
 for j in json.load(sys.stdin)["jobs"]: print(j["status"], j["mode"], j["files"], j.get("error") or "")'
 case "$r" in *error*|*running*|*queued*) echo "::error::downloads did not finish: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
 
+echo "Just a part: 2s to 5s of a 12s clip"
+"$FF" -loglevel error -f lavfi -i testsrc2=size=640x360:rate=30 -f lavfi -i sine=frequency=330 -t 12 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest -movflags +faststart "$MEDIA/long.mp4"
+# long2.mp4 can't be read in pieces from this test server, so Pluck has to fetch it whole and cut it afterwards.
+"$FF" -loglevel error -i "$MEDIA/long.mp4" -c copy "$MEDIA/long2.mp4"
+printf '<html><head><title>Clip page</title></head><body><a href="long.mp4">Watch the clip</a></body></html>' > "$MEDIA/vpage.html"
+FP="$ROOT/bin/ffprobe"; [ -x "$FP" ] || FP="$ROOT/bin/ffprobe.exe"; [ -x "$FP" ] || FP=ffprobe
+for c in long.mp4:video long.mp4:mp3 long2.mp4:video long2.mp4:wav vpage.html:video vpage.html:mp3; do
+  m="${c#*:}"
+  curl -sf "${H[@]}" -d "{\"url\":\"http://127.0.0.1:8765/${c%%:*}\",\"mode\":\"$m\",\"cut\":{\"from\":2,\"to\":5}}" "$API/api/download" > /dev/null
+  for i in $(seq 1 60); do
+    r=$(state | py 'import json,sys; j=json.load(sys.stdin)["jobs"][0]; print(j["status"], j["files"][0] if j["files"] else "", j.get("error") or "")')
+    case "$r" in running*|queued*) sleep 2 ;; *) break ;; esac
+  done
+  f=$(state | py 'import json,sys; j=json.load(sys.stdin)["jobs"][0]; print(j["files"][0] if j["files"] else "")')
+  d=$("$FP" -v error -show_entries format=duration -of csv=p=0 "$f" 2>/dev/null || echo 0)
+  echo "part $c: $r ($d s)"
+  case "$r" in done*) ;; *) echo "::error::part download gave: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
+  py "import sys; d=float(sys.argv[1] or 0); sys.exit(0 if 2.5 <= d <= 3.6 else 1)" "$d" || { echo "::error::part $m is $d seconds, expected about 3"; exit 1; }
+done
+
 echo "Any web page: photos on a plain page"
 p=$(curl -sf "${H[@]}" -d '{"url":"Look at this http://127.0.0.1:8765/page.html"}' "$API/api/probe" | py 'import json,sys; d=json.load(sys.stdin); print(d["engine"], d["kind"], len(d["items"]), d["title"])')
 echo "$p"

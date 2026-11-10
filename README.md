@@ -30,6 +30,7 @@ Pluck keeps itself up to date: fixes for sites every day, and new versions, them
 ## Good to know
 
 - Downloads go to Documents › Pluck. Change it any time in Settings.
+- Save just a part of a video or song: choose Just a part, then set where it starts and ends.
 - Works with Pinterest pins and boards, and with any web page: paste the link and Pluck saves the photos and videos on it.
 - Stories, highlights and private posts need you signed in. On Windows, stay logged in to Instagram in **Firefox** and pick Firefox in Pluck's Settings. On a Mac, Chrome or Safari works too.
 - Spotify songs are matched and downloaded from YouTube Music, because Spotify's own audio is locked.
