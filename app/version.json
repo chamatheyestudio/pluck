@@ -1,8 +1,9 @@
 {
-  "version": "1.4.1",
+  "version": "1.4.2",
   "shell": 3,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "The copied link card now stays open until Pluck has read the link, and starts reading the moment you copy."
+    "Copy several links and they line up in one card, each with its own Save, plus Save all. The card stays until you close it.",
+    "Much quicker: the title and picture show up right away, and you can tap Save before Pluck has finished reading the link."
   ]
 }

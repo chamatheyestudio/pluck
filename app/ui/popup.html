@@ -4,49 +4,51 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pluck</title>
-<!-- The little card that pops up when you copy a link. The Pluck window opens it at /popup?u=LINK. Made by Matte Black. -->
+<!-- The copied links card. The Pluck window opens it at /popup?u=LINK each time a link is copied.
+     It lists every link copied since it was last closed (the engine keeps that list), each with its
+     own Save button, and stays until you close it. Made by Matte Black. -->
 <style>
-:root{--bg:#070707;--fg:#D6D6D6;--muted:#7A7A7A;--acc:#C9B48A;--accfg:#0A0A0A;--line:rgba(255,255,255,.08);--card:#0E0E0E}
+:root{--bg:#070707;--fg:#D6D6D6;--muted:#7A7A7A;--acc:#C9B48A;--accfg:#0A0A0A;--line:rgba(255,255,255,.08);--card:#111}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--fg);font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-user-select:none;user-select:none;cursor:default;overflow:hidden}
-.card{display:flex;gap:12px;padding:12px 12px 12px 12px;border:1px solid var(--line);min-height:100vh}
-.th{width:72px;height:72px;flex:none;border-radius:8px;background:var(--card) center/cover no-repeat;position:relative;overflow:hidden}
-.th.load:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:sh 1.2s linear infinite}
-@keyframes sh{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
-.mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
-.top{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);letter-spacing:.02em}
-.top b{color:var(--fg);font-weight:700;letter-spacing:-.01em;font-size:12px}
-.top .pf{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
-.x{width:22px;height:22px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:15px;line-height:1;cursor:pointer;flex:none}
+#card{border:1px solid var(--line);display:flex;flex-direction:column;max-height:100vh}
+.hd{display:flex;align-items:center;gap:8px;padding:11px 10px 11px 16px;font-size:11px;color:var(--muted);flex:none;min-height:50px}
+.hd b{color:var(--fg);font-weight:700;font-size:13px;letter-spacing:-.01em}
+.hd .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.x{width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:15px;line-height:1;cursor:pointer;flex:none}
 .x:hover{background:var(--line);color:var(--fg)}
-.tt{font-size:13px;line-height:1.35;font-weight:500;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.tt.err{color:#FF8A7A;font-weight:400}
-.btns{display:flex;gap:6px;align-items:center;margin-top:2px;flex-wrap:wrap}
-button.b{height:28px;padding:0 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:600 12px inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
+.list{overflow-y:auto;flex:1;min-height:0}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px 12px 16px;border-top:1px solid var(--line)}
+.th{width:48px;height:48px;flex:none;border-radius:7px;background:var(--card) center/cover no-repeat;position:relative;overflow:hidden}
+.th.load:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.07),transparent);animation:sh 1.2s linear infinite}
+@keyframes sh{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.pf{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt{font-size:13px;font-weight:500;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tt.dim{color:var(--muted);font-weight:400}
+.ok{color:#9FD39A}
+.tt.err{color:#FF8A7A;font-weight:400;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.act{display:flex;gap:6px;align-items:center;flex:none}
+button.b{height:28px;padding:0 11px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:600 12px inherit;font-family:inherit;cursor:pointer;white-space:nowrap}
 button.b:hover{border-color:var(--muted)}
 button.p{background:var(--acc);border-color:var(--acc);color:var(--accfg)}
-button.p:hover{filter:brightness(1.08);border-color:var(--acc)}
-button.l{border:0;background:transparent;color:var(--muted);padding:0 6px;font-weight:500}
-button.l:hover{color:var(--fg)}
+button.p:hover{filter:brightness(1.08)}
+button.b:disabled{opacity:.45;cursor:default;filter:none}
 .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
-.sub{font-size:11px;color:var(--muted)}
+.rm{opacity:0;transition:opacity .15s}
+.row:hover .rm{opacity:1}
 </style>
 </head>
 <body>
-<div class="card" id="card">
-  <div class="th load" id="th"></div>
-  <div class="mid">
-    <div class="top"><b>pluck</b><span class="pf" id="pf">Link copied</span><button class="x" id="x" type="button" title="Close">×</button></div>
-    <div class="tt" id="tt">Taking a look at it…</div>
-    <div id="act"></div>
-  </div>
+<div id="card">
+  <div class="hd"><b>pluck</b><span class="n" id="count">Link copied</span><span id="all"></span><button class="x" id="x" type="button" title="Close">×</button></div>
+  <div class="list" id="list"></div>
 </div>
 <script>
-const $ = (s) => document.querySelector(s);
-const link = new URLSearchParams(location.search).get("u") || "";
+const $ = (s, r = document) => r.querySelector(s);
+const first = new URLSearchParams(location.search).get("u") || "";
 const native = (m) => { try { window.ipc && window.ipc.postMessage(m); } catch (e) {} };
-const close = () => native("close");
 const THEMES = {
   nocturne: ["#0B0D10", "#ECEFF3", "#C6F432", "#0B0D10"], arcade: ["#1A0B2E", "#F1E8FF", "#FF4FA3", "#12061F"], gazette: ["#F4EFE6", "#1B1A17", "#B8261B", "#FFFFFF"],
   abyss: ["#04202C", "#E6F6F5", "#2EC4B6", "#04202C"], abduction: ["#05060F", "#EEF0FF", "#8B7CFF", "#05060F"], matte: ["#070707", "#D6D6D6", "#C9B48A", "#0A0A0A"],
@@ -58,14 +60,14 @@ const post = async (p, b) => {
   if (!r.ok) throw new Error(j.error || "Something went wrong.");
   return j;
 };
-function fit() { native("size:" + Math.ceil($("#card").getBoundingClientRect().height)); }
+const thumb = (u) => (!u ? "" : u.startsWith("data:") ? u : "/api/thumb?u=" + encodeURIComponent(u));
 
-// Close by itself after a while, unless the mouse is on it.
-let timer = 0, hover = false;
-function later(ms) { clearTimeout(timer); timer = setTimeout(() => { if (!hover) close(); else later(2500); }, ms); }
-document.addEventListener("mouseenter", () => { hover = true; });
-document.addEventListener("mouseleave", () => { hover = false; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+// Keep the window the same height as the card.
+let lastH = 0;
+function fit() { const h = Math.ceil($(".hd").offsetHeight + $("#list").scrollHeight + 2); if (h !== lastH) { lastH = h; native("size:" + h); } }
+new ResizeObserver(fit).observe($("#list"));
+function closeAll() { post("/api/copied", { clear: true }).catch(() => {}).finally(() => native("close")); }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
 
 function defMode(i) {
   const types = new Set(i.items.map((x) => x.type));
@@ -78,82 +80,142 @@ function defMode(i) {
 }
 function label(mode, i) {
   const n = i.items.length;
-  if (mode === "mp3") return "Save MP3";
-  if (mode === "photos") return n > 1 ? `Save ${n} photos` : "Save photo";
-  if (mode === "all") return `Save all ${n}`;
-  if (mode === "orig") return "Save";
-  return n > 1 ? `Save ${n} videos` : "Save video";
+  if (mode === "mp3") return "MP3";
+  if (mode === "all" || n > 1) return `Save ${n}`;
+  return "Save";
 }
 
-let info = null;
-function showReady() {
-  const m = defMode(info);
-  const types = new Set(info.items.map((x) => x.type));
-  const mp3 = info.engine !== "spotify" && m !== "mp3" && (types.has("video") || types.has("audio"));
-  $("#act").innerHTML = `<div class="btns"><button class="b p" data-m="${m}" type="button">${esc(label(m, info))}</button>${mp3 ? `<button class="b" data-m="mp3" type="button">MP3</button>` : ""}<button class="b l" id="open" type="button">More options</button></div>`;
-  fit(); later(9000);
+// One row per copied link: looking, ready, saving, saved or a problem.
+const rows = new Map();
+function row(url, jobId) {
+  let r = rows.get(url);
+  if (r) return r;
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = `<div class="th load"></div><div class="mid"><div class="pf">${esc(host(url))}</div><div class="tt dim">Taking a look…</div></div><div class="act"><button class="b p" data-do="early" type="button">Save</button></div>`;
+  r = { url, el, info: null, state: "look", want: null, job: jobId ? { id: jobId } : null };
+  rows.set(url, r);
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.do === "open") native("open:" + url);
+    else if (b.dataset.do === "early") early(r, "save");
+    else if (b.dataset.do === "show") post("/api/reveal", { path: r.job.files[0] || r.job.folder }).catch(() => {});
+    else if (b.dataset.do === "rm") remove(r);
+    else if (b.dataset.m) save(r, b.dataset.m);
+  });
+  look(r);
+  return r;
 }
-function showError(msg) {
-  $("#th").classList.remove("load");
-  $("#tt").className = "tt err"; $("#tt").textContent = msg;
-  $("#act").innerHTML = `<div class="btns"><button class="b" id="open" type="button">Open in Pluck</button></div>`;
-  fit(); later(8000);
+function host(u) { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return "Link"; } }
+function setAct(r, html) { $(".act", r.el).innerHTML = html; }
+
+// Tapped Save before Pluck finished reading: it saves the moment it's ready.
+function early(r, want) {
+  if (r.state !== "look" || r.want) return;
+  r.want = want;
+  $(".pf", r.el).textContent = "Saves as soon as it's ready";
+  setAct(r, ""); header();
+}
+// Title and picture first (about a second), the full read follows.
+async function quick(r) {
+  try {
+    const q = await (await fetch("/api/peek?u=" + encodeURIComponent(r.url))).json();
+    if (r.state !== "look") return;
+    if (q.thumb) { $(".th", r.el).classList.remove("load"); $(".th", r.el).style.backgroundImage = `url("${thumb(q.thumb)}")`; }
+    if (q.title) { const t = $(".tt", r.el); t.classList.remove("dim"); t.textContent = q.title; }
+  } catch (e) {}
 }
 
-async function save(mode) {
-  clearTimeout(timer);
-  $("#act").innerHTML = `<div class="bar"><i id="fill"></i></div><div class="sub" id="st">Starting</div>`;
-  fit();
-  let job;
-  try { job = await post("/api/download", { url: link, mode, quality: "best", select: [] }); }
-  catch (e) { showError(e.message); return; }
+async function look(r) {
+  quick(r);
+  const slow = setTimeout(() => { if (r.state === "look" && $(".tt", r.el).classList.contains("dim")) $(".tt", r.el).textContent = "Still looking. Almost there…"; }, 7000);
+  try {
+    const i = await post("/api/probe", { url: r.url });
+    r.info = i; r.state = "ready";
+    $(".th", r.el).classList.remove("load");
+    if (i.thumb) $(".th", r.el).style.backgroundImage = `url("${thumb(i.thumb)}")`;
+    $(".pf", r.el).textContent = `${i.platform.name}${i.platform.sub ? " " + i.platform.sub.toLowerCase() : ""}${i.author ? " · " + i.author : ""}`;
+    $(".tt", r.el).classList.remove("dim"); $(".tt", r.el).textContent = i.title || "Ready to save";
+    const m = defMode(i);
+    const types = new Set(i.items.map((x) => x.type));
+    const mp3 = i.engine !== "spotify" && m !== "mp3" && (types.has("video") || types.has("audio"));
+    if (r.job) { save(r, null); return; }
+    if (r.want) { save(r, defMode(i)); return; }
+    setAct(r, `<button class="b p" data-m="${m}" type="button">${esc(label(m, i))}</button>${mp3 ? `<button class="b" data-m="mp3" type="button">MP3</button>` : ""}`);
+  } catch (e) {
+    r.state = "error";
+    $(".th", r.el).classList.remove("load");
+    $(".tt", r.el).className = "tt err"; $(".tt", r.el).textContent = e.message;
+    setAct(r, `<button class="b" data-do="open" type="button">Open</button><button class="x rm" data-do="rm" type="button" title="Remove">×</button>`);
+  } finally { clearTimeout(slow); header(); }
+}
+
+// mode null: carry on with a save that started before the card reopened.
+async function save(r, mode) {
+  if (r.state !== "ready") return;
+  r.state = "saving";
+  setAct(r, "");
+  const mid = $(".mid", r.el);
+  const bar = document.createElement("div"); bar.className = "bar"; bar.innerHTML = "<i></i>"; mid.appendChild(bar);
+  header();
+  try {
+    if (mode) { $(".tt", r.el).classList.remove("dim"); r.job = await post("/api/download", { url: r.url, mode, quality: "best", select: [] }); post("/api/copied", { url: r.url, job: r.job.id }).catch(() => {}); }
+  }
+  catch (e) { bar.remove(); r.state = "error"; $(".tt", r.el).className = "tt err"; $(".tt", r.el).textContent = e.message; setAct(r, `<button class="b" data-do="open" type="button">Open</button>`); header(); return; }
   const poll = async () => {
     let j;
-    try { j = (await (await fetch("/api/state")).json()).jobs.find((x) => x.id === job.id); } catch (e) { setTimeout(poll, 1000); return; }
+    try { j = (await (await fetch("/api/state")).json()).jobs.find((x) => x.id === r.job.id); } catch (e) { setTimeout(poll, 1000); return; }
     if (!j) { setTimeout(poll, 800); return; }
-    $("#fill") && ($("#fill").style.width = Math.max(4, j.pct || 0) + "%");
+    $("i", bar).style.width = Math.max(4, j.pct || 0) + "%";
     if (j.status === "done") {
-      const n = j.files.length;
-      $("#act").innerHTML = `<div class="btns"><span class="sub" style="flex:1">Saved${n > 1 ? ` ${n} files` : ""}</span><button class="b p" id="show" type="button">Show</button></div>`;
-      $("#show").onclick = () => { post("/api/reveal", { path: j.files[0] || j.folder }).catch(() => {}); close(); };
-      fit(); later(7000); return;
+      r.job = j; r.state = "done"; bar.remove();
+      $(".pf", r.el).textContent = `Saved${j.files.length > 1 ? ` ${j.files.length} files` : ""}`; $(".pf", r.el).classList.add("ok");
+      setAct(r, `<button class="b" data-do="show" type="button">Show</button>`);
+      header(); return;
     }
-    if (j.status === "error") { showError(j.error || "Couldn't save this one."); return; }
-    if (j.status === "canceled") { close(); return; }
-    $("#st").textContent = j.status === "queued" ? "Waiting for the one before it" : `${Math.round(j.pct || 0)}%${j.speed ? " · " + j.speed : ""}`;
+    if (j.status === "error" || j.status === "canceled") {
+      bar.remove(); r.state = "error"; $(".tt", r.el).className = "tt err"; $(".tt", r.el).textContent = j.error || "Couldn't save this one.";
+      setAct(r, `<button class="b" data-do="open" type="button">Open</button>`); header(); return;
+    }
+    $(".pf", r.el).textContent = j.status === "queued" ? "Waiting for the one before it" : `Saving · ${Math.round(j.pct || 0)}%${j.speed ? " · " + j.speed : ""}`;
     setTimeout(poll, 600);
   };
   poll();
 }
 
-document.addEventListener("click", (e) => {
+function remove(r) {
+  r.el.remove(); rows.delete(r.url);
+  post("/api/copied", { remove: r.url }).catch(() => {});
+  if (!rows.size) native("close"); else header();
+}
+
+function header() {
+  const list = [...rows.values()];
+  const n = list.length;
+  const ready = list.filter((r) => r.state === "ready" || (r.state === "look" && !r.want)).length;
+  const saving = list.filter((r) => r.state === "saving").length;
+  $("#count").textContent = n <= 1 ? (list[0] && list[0].state === "done" ? "Saved" : "Link copied") : `${n} links copied${saving ? ` · saving ${saving}` : ""}`;
+  $("#all").innerHTML = n > 1 && ready > 1 ? `<button class="b p" id="saveAll" type="button">Save all ${ready}</button>` : "";
+}
+$("#card").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
-  if (b.id === "x") { close(); return; }
-  if (b.id === "open") { native("open:" + link); return; }
-  if (b.dataset.m) save(b.dataset.m);
+  if (b.id === "x") closeAll();
+  if (b.id === "saveAll") for (const r of rows.values()) { if (r.state === "ready") save(r, defMode(r.info)); else if (r.state === "look") early(r, "save"); }
 });
 
 (async () => {
   try {
     const n = await (await fetch("/api/native")).json();
     const t = THEMES[n.theme] || THEMES.matte;
-    const r = document.documentElement.style;
-    r.setProperty("--bg", t[0]); r.setProperty("--fg", t[1]); r.setProperty("--acc", t[2]); r.setProperty("--accfg", t[3]);
-    if (n.theme === "gazette") { r.setProperty("--line", "rgba(0,0,0,.12)"); r.setProperty("--card", "#EAE3D6"); r.setProperty("--muted", "#6E685E"); }
+    const s = document.documentElement.style;
+    s.setProperty("--bg", t[0]); s.setProperty("--fg", t[1]); s.setProperty("--acc", t[2]); s.setProperty("--accfg", t[3]);
+    if (n.theme === "gazette") { s.setProperty("--line", "rgba(0,0,0,.12)"); s.setProperty("--card", "#EAE3D6"); s.setProperty("--muted", "#6E685E"); }
   } catch (e) {}
-  // Stay open while Pluck reads the link, however long it takes.
-  $("#act").innerHTML = `<div class="btns"><button class="b l" id="open" type="button" style="padding-left:0">Open in Pluck</button></div>`;
-  fit();
-  const slow = setTimeout(() => { if (!info) $("#tt").textContent = "Still looking. Some posts take a little longer…"; }, 7000);
-  try {
-    info = await post("/api/probe", { url: link });
-    clearTimeout(slow);
-    $("#pf").textContent = `${info.platform.name}${info.platform.sub ? " " + info.platform.sub.toLowerCase() : ""}${info.author ? " · " + info.author : ""}`;
-    $("#tt").textContent = info.title || "Ready to save";
-    $("#th").classList.remove("load");
-    if (info.thumb) $("#th").style.backgroundImage = `url("${info.thumb.startsWith("data:") ? info.thumb : "/api/thumb?u=" + encodeURIComponent(info.thumb)}")`;
-    showReady();
-  } catch (e) { clearTimeout(slow); showError(e.message); }
+  let links = [];
+  try { links = (await (await fetch("/api/copied")).json()).links || []; } catch (e) {}
+  if (first && !links.some((x) => x.url === first)) links.unshift({ url: first });
+  for (const x of links) $("#list").appendChild(row(x.url, x.job).el);
+  header(); fit();
 })();
 </script>
 </body>

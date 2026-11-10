@@ -330,7 +330,7 @@ async function probeYt(url: string, pf: Platform): Promise<Info> {
   const attempts = ytAttempts(pf.id);
   let lastErr = "";
   for (let i = 0; i < attempts.length; i++) {
-    const r = await run(ytdlp(), [...ytCommon(), ...attempts[i], "-J", "--flat-playlist", "--no-playlist", "--", url], { capture: true, timeoutMs: 90000 });
+    const r = await run(ytdlp(), [...ytCommon(), ...attempts[i], "-J", "--flat-playlist", "--no-playlist", "--", url], { capture: true, timeoutMs: attempts[i][0] === "--cookies-from-browser" ? 30000 : 60000 });
     if (r.code === 0 && r.out.trim().startsWith("{")) {
       const j = JSON.parse(r.out);
       return ytInfo(url, pf, j, i);
@@ -379,7 +379,7 @@ async function probeGallery(url: string, pf: Platform): Promise<Info> {
   const attempts = gdAttempts(pf.id);
   let lastErr = "";
   for (let i = 0; i < attempts.length; i++) {
-    const r = await run(gallerydl(), [...attempts[i], "-J", "--range", "1-80", "--", url], { capture: true, timeoutMs: 120000 });
+    const r = await run(gallerydl(), [...attempts[i], "-J", "--range", "1-80", "--", url], { capture: true, timeoutMs: attempts[i][0] === "--cookies-from-browser" ? 30000 : 60000 });
     let msgs: any = null;
     try { msgs = JSON.parse(r.out); } catch { /* not json */ }
     const files: { u: string; kw: any }[] = [];
@@ -455,6 +455,43 @@ async function probeSpotify(url: string, pf: Platform): Promise<Info> {
   };
 }
 
+// A quick first look (title and picture) for the copied links card, while the full read carries on.
+type Peek = { title?: string; thumb?: string; author?: string };
+const peeks = new Map<string, Promise<Peek>>();
+function peek(u: string): Promise<Peek> {
+  let p = peeks.get(u);
+  if (!p) { p = peekNow(u).catch(() => ({})); peeks.set(u, p); if (peeks.size > 100) peeks.delete(peeks.keys().next().value!); }
+  return p;
+}
+async function peekNow(u: string): Promise<Peek> {
+  const hit = probeCache.get(u);
+  if (hit) return { title: hit.title, thumb: hit.thumb, author: hit.author };
+  const pf = detect(u);
+  const get = (x: string) => fetch(x, { headers: { "User-Agent": UA, "Accept-Language": "en-US,en;q=0.9" }, signal: AbortSignal.timeout(5000) });
+  const oembed: Record<string, string> = {
+    youtube: "https://www.youtube.com/oembed?format=json&url=", tiktok: "https://www.tiktok.com/oembed?url=",
+    vimeo: "https://vimeo.com/api/oembed.json?url=", soundcloud: "https://soundcloud.com/oembed?format=json&url=",
+    spotify: "https://open.spotify.com/oembed?url=", reddit: "https://www.reddit.com/oembed?url=",
+  };
+  if (oembed[pf.id]) {
+    try {
+      const r = await get(oembed[pf.id] + encodeURIComponent(u));
+      if (r.ok) { const j = await r.json(); return { title: j.title, thumb: j.thumbnail_url, author: j.author_name }; }
+      await r.body?.cancel();
+    } catch { /* fall back to the page */ }
+  }
+  const r = await get(u);
+  if (!r.ok || !/html/i.test(r.headers.get("content-type") ?? "")) { await r.body?.cancel(); return {}; }
+  const html = (await r.text()).slice(0, 600_000);
+  const meta: Record<string, string> = {};
+  for (const m of html.matchAll(/<meta\s[^>]*>/gi)) { const a = attrs(m[0]); const k = (a.property ?? a.name ?? "").toLowerCase(); if (k && a.content && !(k in meta)) meta[k] = a.content; }
+  const title = (meta["og:title"] ?? meta["twitter:title"] ?? html.match(/<title[^>]*>([^<]*)/i)?.[1] ?? "").replace(/\s+/g, " ").trim();
+  const thumb = meta["og:image"] ?? meta["twitter:image"] ?? "";
+  // Login pages say nothing useful.
+  if (/^(Instagram|Login|Log in|Sign in)\b/i.test(title) && !thumb) return {};
+  return { title: unent(title), thumb: thumb ? new URL(unent(thumb), r.url).href : "", author: meta["og:site_name"] };
+}
+
 // One look per link at a time: the copied link card, the window and a download all share it.
 const probing = new Map<string, Promise<Info>>();
 function probeShared(url: string): Promise<Info> {
@@ -474,10 +511,24 @@ async function probe(url: string): Promise<Info> {
   const isImage = IMAGE_EXT.has(ext(new URL(url).pathname));
   const order = GALLERY_FIRST.has(pf.id) || isImage || (pf.id === "tiktok" && pf.sub === "Photos") ? ["gallery", "ytdlp"] : ["ytdlp", "gallery"];
   let firstErr = "";
-  for (const eng of order) {
-    try { return eng === "ytdlp" ? await probeYt(url, pf) : await probeGallery(url, pf); }
-    catch (e) { const m = e instanceof Error ? e.message : String(e); if (!firstErr || /login|sign in|private|cookie|401|403/i.test(m)) firstErr = m; log("probe", eng, url, m.slice(0, 400)); }
+  const t0 = Date.now();
+  let settled = false;
+  const go = (eng: string) => (eng === "ytdlp" ? probeYt(url, pf) : probeGallery(url, pf)).then((i) => ({ i, e: "" }), (e) => ({ i: null as Info | null, e: e instanceof Error ? e.message : String(e) }));
+  // The second engine gets going after a few seconds, so a slow first one doesn't hold everything up.
+  const first = go(order[0]);
+  type R = { i: Info | null; e: string };
+  const second = new Promise<R>((res) => {
+    let started = false;
+    const start = () => { if (!started) { started = true; res(go(order[1])); } };
+    first.then((r) => { if (r.i) { if (!started) { started = true; res({ i: null, e: "" }); } } else start(); });
+    setTimeout(() => { if (!settled) start(); }, 4000);
+  });
+  for (const [k, task] of [first, second].entries()) {
+    const r = await task;
+    if (r.i) { settled = true; log("probe ok", order[k], url, `${Date.now() - t0}ms`); return r.i; }
+    if (r.e) { if (!firstErr || /login|sign in|private|cookie|401|403/i.test(r.e)) firstErr = r.e; log("probe", order[k], url, r.e.slice(0, 400)); }
   }
+  settled = true;
   // Any other page: collect the photos and videos on it, so every link gives you something.
   if (!/login|sign in|private|cookie|401|\b404\b|Not Found|getaddrinfo|resolve host|unreachable|DRM/i.test(firstErr)) {
     try { return await probePage(url, pf); }
@@ -1585,6 +1636,8 @@ const clients = new Set<Client>();
 let lastSeen = Date.now();
 let lastNative = 0;
 let popups = 0;
+// Links copied since the card was last closed, newest first.
+const copied: { url: string; job?: string }[] = [];
 let clipAsks = 0;
 let bTimer: ReturnType<typeof setTimeout> | undefined;
 const enc = new TextEncoder();
@@ -1620,6 +1673,8 @@ async function handle(req: Request): Promise<Response> {
       return new Response(await Deno.readTextFile(join(APP_DIR, "ui", "popup.html")), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     // The Pluck window checks in now and then while it runs in the background.
+    if (path === "/api/copied") return json({ links: copied });
+    if (path === "/api/peek") return json(await peek(pickUrl(url.searchParams.get("u") ?? "")));
     if (path === "/api/native") {
       lastNative = Date.now();
       return json({ popup: settings.linkPopup, theme: settings.theme });
@@ -1641,6 +1696,8 @@ async function handle(req: Request): Promise<Response> {
       } catch { ok = false; }
       // Start reading the link right away, so the card has it sooner.
       if (ok && have("ytdlp") && !setupRun) probeShared(u).catch(() => {});
+      if (ok) peek(u);
+      if (ok) { const old = copied.find((x) => x.url === u); copied.splice(0, copied.length, old ?? { url: u }, ...copied.filter((x) => x.url !== u)); copied.length = Math.min(copied.length, 12); }
       return json(ok ? { show: true, url: u } : { show: false });
     }
     if (path === "/icon.png") {
@@ -1691,7 +1748,7 @@ async function handle(req: Request): Promise<Response> {
         try { new URL(u); } catch { throw new Friendly("That doesn't look like a link. Copy the full address and paste it again."); }
         if (setupRun) await setupRun;
         if (!have("ytdlp")) throw new Friendly("Pluck is still missing its download engine. Open Settings and choose Finish setup.");
-        if (updating) await Promise.race([updating, sleep(20000)]);
+        if (updating && !probing.has(u) && !probeCache.has(u)) await Promise.race([updating, sleep(6000)]);
         const info = await probeShared(u);
         probeCache.set(u, info);
         return json(info);
@@ -1737,6 +1794,12 @@ async function handle(req: Request): Promise<Response> {
         for (let i = jobs.length - 1; i >= 0; i--) if (["done", "error", "canceled"].includes(jobs[i].status)) jobs.splice(i, 1);
         broadcast();
         return json({ ok: true });
+      }
+      case "/api/copied": {
+        if (body.clear) copied.length = 0;
+        else if (body.remove) { const i = copied.findIndex((x) => x.url === String(body.remove)); if (i >= 0) copied.splice(i, 1); }
+        else if (body.url && body.job) { const c = copied.find((x) => x.url === String(body.url)); if (c) c.job = String(body.job); else copied.unshift({ url: String(body.url), job: String(body.job) }); }
+        return json({ links: copied });
       }
       case "/api/settings": {
         const allowed = ["theme", "outDir", "askEachTime", "ownFolders", "openAtLogin", "music", "sfx", "browser", "lastVersion", "linkPopup"] as const;
