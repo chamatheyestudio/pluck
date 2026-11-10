@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "shell": 3,
+  "shell": 2,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
     "Save just a part. Pick Just a part under Length, then drag the handles or type the start and end times.",

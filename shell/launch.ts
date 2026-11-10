@@ -8,7 +8,7 @@
 // Bump SHELL only when the app needs something new from the launcher or installer. Releases whose
 // app/version.json "shell" is higher than this tell people to download the new installer instead.
 
-const SHELL = 3;
+const SHELL = 2;
 const PORT = Number(Deno.env.get("PLUCK_PORT") ?? 47821);
 const isWin = Deno.build.os === "windows";
 const isMac = Deno.build.os === "darwin";

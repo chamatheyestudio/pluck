@@ -139,7 +139,7 @@ async function run(t: Tool, args: string[], o: RunOpts = {}): Promise<RunResult>
 
 type Settings = {
   theme: string | null; outDir: string; askEachTime: boolean; ownFolders: boolean; openAtLogin: boolean;
-  music: boolean; sfx: boolean; browser: string; lastUpdate: number; lastVersion: string | null; linkPopup: boolean;
+  music: boolean; sfx: boolean; browser: string; lastUpdate: number; lastVersion: string | null;
 };
 const SETTINGS_FILE = join(ROOT, "settings.json");
 let settings!: Settings;
@@ -167,7 +167,6 @@ async function loadSettings() {
     browser: s.browser ?? "auto",
     lastUpdate: s.lastUpdate ?? 0,
     lastVersion: s.lastVersion ?? null,
-    linkPopup: s.linkPopup ?? true,
   };
 }
 async function saveSettings() {
@@ -1499,7 +1498,7 @@ async function setOpenAtLogin(on: boolean) {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>com.matteblack.pluck</string>
-<key>ProgramArguments</key><array><string>/usr/bin/open</string>${[...(SHELL >= 3 ? ["-g"] : []), ...target, ...(SHELL >= 3 ? ["--args", "--background"] : [])].map((t) => `<string>${xml(t)}</string>`).join("")}</array>
+<key>ProgramArguments</key><array><string>/usr/bin/open</string>${target.map((t) => `<string>${xml(t)}</string>`).join("")}</array>
 <key>RunAtLoad</key><true/>
 <key>LimitLoadToSessionType</key><string>Aqua</string>
 </dict></plist>
@@ -1511,7 +1510,7 @@ async function setOpenAtLogin(on: boolean) {
       const startup = join(Deno.env.get("APPDATA") ?? "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Pluck.vbs");
       if (on) {
         if (exists(exe)) {
-          const r = await osRun("reg", ["add", key, "/v", "Pluck", "/t", "REG_SZ", "/d", SHELL >= 3 ? `"${exe}" --background` : `"${exe}"`, "/f"]);
+          const r = await osRun("reg", ["add", key, "/v", "Pluck", "/t", "REG_SZ", "/d", `"${exe}"`, "/f"]);
           if (r.code !== 0) throw new Error(r.err || "reg add failed");
         } else await Deno.copyFile(join(ROOT, "Pluck.vbs"), startup);
       } else {
@@ -1570,8 +1569,6 @@ async function openWindow() {
 type Client = { send: (s: string) => void; ping: ReturnType<typeof setInterval> };
 const clients = new Set<Client>();
 let lastSeen = Date.now();
-let lastNative = 0;
-let popups = 0;
 let bTimer: ReturnType<typeof setTimeout> | undefined;
 const enc = new TextEncoder();
 
@@ -1601,38 +1598,12 @@ async function handle(req: Request): Promise<Response> {
     if (path === "/" || path === "/index.html") {
       return new Response(await Deno.readTextFile(join(APP_DIR, "ui", "index.html")), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
-    if (path === "/popup") {
-      popups++;
-      return new Response(await Deno.readTextFile(join(APP_DIR, "ui", "popup.html")), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
-    }
-    // The Pluck window checks in now and then while it runs in the background.
-    if (path === "/api/native") {
-      lastNative = Date.now();
-      return json({ popup: settings.linkPopup, theme: settings.theme });
-    }
-    // A link was just copied somewhere: is it one Pluck should offer to save?
-    if (path === "/api/clip") {
-      lastNative = Date.now();
-      const raw = url.searchParams.get("u") ?? "";
-      if (!settings.linkPopup || !/https?:\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\//i.test(raw) || raw.length > 4000) return json({ show: false });
-      const u = pickUrl(raw);
-      let ok = false;
-      try {
-        const x = new URL(u);
-        const pf = detect(u);
-        const e = ext(x.pathname);
-        ok = !/^(127\.0\.0\.1|localhost)$/.test(x.hostname) && (pf.id !== "web" || VIDEO_EXT.has(e) || AUDIO_EXT.has(e));
-        if (pf.id === "youtube" && !/\/(watch|shorts|live|embed|playlist)|youtu\.be\/./.test(u)) ok = false;
-        if (pf.id === "spotify" && pf.sub === "Link") ok = false;
-      } catch { ok = false; }
-      return json(ok ? { show: true, url: u } : { show: false });
-    }
     if (path === "/icon.png") {
       try { return new Response(await Deno.readFile(join(APP_DIR, "ui", "icon.png")), { headers: { "content-type": "image/png" } }); } catch { return new Response("", { status: 404 }); }
     }
     if (path === "/api/state") {
       const news = settings.lastVersion && settings.lastVersion !== VERSION ? { version: VERSION, notes: VINFO.notes } : null;
-      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, windows: clients.size, popups, ...snapshot() });
+      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, windows: clients.size, ...snapshot() });
     }
     if (path === "/api/events") {
       let client: Client;
@@ -1723,7 +1694,7 @@ async function handle(req: Request): Promise<Response> {
         return json({ ok: true });
       }
       case "/api/settings": {
-        const allowed = ["theme", "outDir", "askEachTime", "ownFolders", "openAtLogin", "music", "sfx", "browser", "lastVersion", "linkPopup"] as const;
+        const allowed = ["theme", "outDir", "askEachTime", "ownFolders", "openAtLogin", "music", "sfx", "browser", "lastVersion"] as const;
         for (const k of allowed) {
           if (!(k in body)) continue;
           if (k === "openAtLogin" && body[k] !== settings.openAtLogin) await setOpenAtLogin(!!body[k]);
@@ -1758,8 +1729,6 @@ async function handle(req: Request): Promise<Response> {
 // ---------------------------------------------------------------- start
 
 await loadSettings();
-// Copies set to open at login before the background start existed get the quiet start now.
-if (settings.openAtLogin && SHELL >= 3 && NATIVE) setOpenAtLogin(true).catch(() => {});
 if (!settings.lastVersion) { settings.lastVersion = VERSION; await saveSettings(); }
 for (let i = 0; ; i++) {
   try { Deno.serve({ port: PORT, hostname: "127.0.0.1", onListen: () => {} }, handle); break; }
@@ -1781,5 +1750,5 @@ setTimeout(() => checkAppUpdate(), 8000);
 setInterval(() => checkAppUpdate(), 6 * 3600 * 1000);
 setInterval(() => {
   if (NO_EXIT || setupRun || appUpdRun || restarting || busy()) return;
-  if (clients.size === 0 && Date.now() - lastSeen > 25000 && Date.now() - startedAt > 60000 && Date.now() - lastNative > 40000) Deno.exit(0);
+  if (clients.size === 0 && Date.now() - lastSeen > 25000 && Date.now() - startedAt > 60000) Deno.exit(0);
 }, 5000);

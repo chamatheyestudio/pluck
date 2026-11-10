@@ -132,18 +132,11 @@ jobs:
           if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-window.png --out mac-small.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-small.jpg && echo "SHOT-END"; fi
           pgrep -lf "Pluck.app/Contents/MacOS/Pluck"
           curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["windows"]; print("windows showing Pluck:", n); sys.exit(0 if n >= 1 else 1)'
-      - name: Copy a link and check the card pops up
-        run: |
-          printf 'Look at this https://www.youtube.com/watch?v=jNQXAC9IVRw' | pbcopy
-          sleep 12
-          screencapture -x mac-card.png || true
-          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["popups"]; print("cards shown:", n); sys.exit(0 if n >= 1 else 1)'
-          osascript -e 'tell application "System Events" to tell process "Pluck" to get name of every window' || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mac-window
-          path: mac-*.png
+          path: mac-window.png
           if-no-files-found: ignore
 
   test-windows:
@@ -194,24 +187,11 @@ jobs:
           $n = (Invoke-RestMethod http://127.0.0.1:47821/api/state).windows
           "windows showing Pluck: $n"
           if ($n -lt 1) { exit 1 }
-      - name: Copy a link and check the card pops up
-        shell: pwsh
-        run: |
-          Set-Clipboard -Value "Look at this https://www.youtube.com/watch?v=jNQXAC9IVRw"
-          Start-Sleep -Seconds 12
-          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
-          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("$PWD\win-card.png")
-          $n = (Invoke-RestMethod http://127.0.0.1:47821/api/state).popups
-          "cards shown: $n"
-          if ($n -lt 1) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: win-window
-          path: win-*.png
+          path: win-window.png
           if-no-files-found: ignore
       - name: Uninstall
         run: |
