@@ -363,10 +363,11 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
         fn GetClipboardSequenceNumber() -> u32;
     }
     std::thread::spawn(move || {
-        let mut cb: Option<arboard::Clipboard> = None;
-        let mut last: Option<String> = None;
+        // Whatever was copied before Pluck started doesn't count.
         #[cfg(windows)]
-        let mut seq = 0u32;
+        let mut seq = unsafe { GetClipboardSequenceNumber() };
+        let mut cb: Option<arboard::Clipboard> = arboard::Clipboard::new().ok();
+        let mut last: String = cb.as_mut().and_then(|c| c.get_text().ok()).unwrap_or_default();
         loop {
             std::thread::sleep(Duration::from_millis(600));
             // Only look when something new was copied, so Pluck never gets in the way of copy and paste.
@@ -404,14 +405,12 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
                     continue;
                 }
             };
-            if last.as_deref() == Some(text.as_str()) {
+            if last == text {
                 continue;
             }
-            let first = last.is_none();
-            note(&format!("copied {} chars, first={first}", text.len()));
-            last = Some(text.clone());
-            // Whatever was copied before Pluck started doesn't count.
-            if first || !on.load(Ordering::Relaxed) {
+            note(&format!("copied {} chars", text.len()));
+            last = text.clone();
+            if !on.load(Ordering::Relaxed) {
                 continue;
             }
             let t = text.trim();
