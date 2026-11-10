@@ -2,7 +2,10 @@
 //
 // A small native window around Pluck's engine (the local server in app/server.ts). It starts the
 // engine in the background, shows a warm up screen until the engine answers, then shows Pluck.
-// Closing the window quits the app; the engine finishes any downloads and then stops by itself.
+// It also watches for copied links: when one is copied anywhere, a small card pops up in the corner
+// (the card is app/ui/popup.html, so it updates with the app). While that is on, closing the window
+// keeps Pluck running (Dock on Mac, tray on Windows). Otherwise closing quits; the engine finishes
+// any downloads and then stops by itself.
 // This file ships inside the installers and is not auto updated, so keep it small and stable.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -10,13 +13,15 @@
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tao::dpi::LogicalSize;
+use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event::{Event, StartCause, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::{Icon, Theme, WindowBuilder};
-use wry::{NewWindowResponse, WebContext, WebViewBuilder};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopWindowTarget};
+use tao::window::{Icon, Theme, Window, WindowBuilder};
+use wry::{NewWindowResponse, WebContext, WebView, WebViewBuilder};
 
 const ENGINE: &str = "127.0.0.1:47821";
 const HOME: &str = "http://127.0.0.1:47821/";
@@ -39,7 +44,20 @@ enum Msg {
     Slow,
     Failed,
     Show,
+    Quit,
+    /// A link was copied that Pluck can save.
+    Clip(String),
+    /// A message from the copied link card.
+    Card(String),
 }
+
+/// The copied link card. The web view goes before the window so it is dropped first.
+struct Card {
+    web: WebView,
+    win: Window,
+}
+
+const CARD_W: f64 = 380.0;
 
 fn main() {
     if std::env::args().any(|a| a == "--smoke") {
@@ -63,6 +81,8 @@ fn main() {
         }
     };
 
+    let background = std::env::args().any(|a| a == "--background");
+    let popup_on = Arc::new(AtomicBool::new(true));
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
@@ -82,6 +102,7 @@ fn main() {
         .with_min_inner_size(LogicalSize::new(w.min(980.0), h.min(640.0)))
         .with_theme(Some(Theme::Dark))
         .with_background_color(BG)
+        .with_visible(!background)
         .with_window_icon(Icon::from_rgba(include_bytes!("../icon64.rgba").to_vec(), 64, 64).ok())
         .build(&event_loop)
         .expect("could not open the Pluck window");
@@ -133,6 +154,7 @@ fn main() {
     // Start the engine and wait for it on a side thread.
     {
         let proxy = proxy.clone();
+        let popup_on = popup_on.clone();
         std::thread::spawn(move || {
             start_engine();
             let t = Instant::now();
@@ -140,7 +162,7 @@ fn main() {
             loop {
                 if engine_up() {
                     let _ = proxy.send_event(Msg::Ready);
-                    return;
+                    break;
                 }
                 if !told_slow && t.elapsed() > Duration::from_secs(12) {
                     told_slow = true;
@@ -152,8 +174,37 @@ fn main() {
                 }
                 std::thread::sleep(Duration::from_millis(250));
             }
+            // Check in with the engine now and then, and keep the popup setting in step.
+            loop {
+                if let Some(b) = http_get("/api/native") {
+                    popup_on.store(b.contains("\"popup\":true"), Ordering::Relaxed);
+                } else {
+                    start_engine();
+                }
+                std::thread::sleep(Duration::from_secs(10));
+            }
         });
     }
+    #[cfg(any(target_os = "macos", windows))]
+    watch_clipboard(proxy.clone(), popup_on.clone());
+
+    #[cfg(windows)]
+    {
+        let p = proxy.clone();
+        tray_icon::menu::MenuEvent::set_event_handler(Some(move |e: tray_icon::menu::MenuEvent| {
+            let _ = p.send_event(if e.id.0 == "quit" { Msg::Quit } else { Msg::Show });
+        }));
+        let p = proxy.clone();
+        tray_icon::TrayIconEvent::set_event_handler(Some(move |e: tray_icon::TrayIconEvent| {
+            use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                let _ = p.send_event(Msg::Show);
+            }
+        }));
+    }
+    #[cfg(windows)]
+    let mut tray: Option<tray_icon::TrayIcon> = None;
+    let mut card: Option<Card> = None;
 
     if let Some(l) = listener {
         let proxy = proxy.clone();
@@ -166,9 +217,8 @@ fn main() {
         });
     }
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, target, control_flow| {
         *control_flow = ControlFlow::Wait;
-        let _ = &context;
         match event {
             Event::NewEvents(StartCause::Init) => {
                 #[cfg(target_os = "macos")]
@@ -176,6 +226,42 @@ fn main() {
                     menu.0.init_for_nsapp();
                     menu.1.set_as_windows_menu_for_nsapp();
                 }
+                #[cfg(windows)]
+                {
+                    tray = make_tray();
+                }
+            }
+            Event::UserEvent(Msg::Clip(url)) => {
+                // Copied inside Pluck itself: the window handles it.
+                if window.is_visible() && window.is_focused() {
+                    return;
+                }
+                card = None;
+                card = open_card(target, &mut context, &proxy, &url);
+            }
+            Event::UserEvent(Msg::Card(m)) => {
+                if m == "close" {
+                    card = None;
+                } else if let Some(h) = m.strip_prefix("size:") {
+                    if let (Some(c), Ok(h)) = (card.as_ref(), h.trim().parse::<f64>()) {
+                        place_card(target, &c.win, h.clamp(80.0, 260.0));
+                    }
+                } else if let Some(u) = m.strip_prefix("open:") {
+                    card = None;
+                    window.set_visible(true);
+                    window.set_minimized(false);
+                    window.set_focus();
+                    let js = format!("window.pluckOpenLink && window.pluckOpenLink({})", js_string(u));
+                    let _ = webview.evaluate_script(&js);
+                }
+            }
+            Event::UserEvent(Msg::Quit) => {
+                card = None;
+                #[cfg(windows)]
+                {
+                    tray = None;
+                }
+                *control_flow = ControlFlow::Exit;
             }
             Event::UserEvent(Msg::Ready) => {
                 let _ = webview.load_url(HOME);
@@ -191,12 +277,219 @@ fn main() {
                 window.set_minimized(false);
                 window.set_focus();
             }
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                *control_flow = ControlFlow::Exit;
+            Event::WindowEvent { event: WindowEvent::CloseRequested, window_id, .. } => {
+                if let Some(c) = card.as_ref() {
+                    if c.win.id() == window_id {
+                        card = None;
+                        return;
+                    }
+                }
+                // With link popups on, Pluck stays around (Dock on Mac, tray on Windows).
+                if popup_on.load(Ordering::Relaxed) {
+                    window.set_visible(false);
+                } else {
+                    *control_flow = ControlFlow::Exit;
+                }
             }
             _ => {}
         }
     });
+}
+
+/// Open the copied link card in the corner of the screen, without taking focus.
+fn open_card(target: &EventLoopWindowTarget<Msg>, context: &mut WebContext, proxy: &tao::event_loop::EventLoopProxy<Msg>, url: &str) -> Option<Card> {
+    let b = WindowBuilder::new()
+        .with_title("Pluck")
+        .with_decorations(false)
+        .with_resizable(false)
+        .with_always_on_top(true)
+        .with_focused(false)
+        .with_visible(false)
+        .with_inner_size(LogicalSize::new(CARD_W, 100.0))
+        .with_background_color(BG);
+    #[cfg(windows)]
+    let b = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        b.with_skip_taskbar(true)
+    };
+    let win = b.build(target).ok()?;
+    place_card(target, &win, 100.0);
+    let p = proxy.clone();
+    let wb = WebViewBuilder::new_with_web_context(context)
+        .with_url(format!("{HOME}popup?u={}", enc(url)))
+        .with_background_color(BG)
+        .with_devtools(false)
+        .with_focused(false)
+        .with_accept_first_mouse(true)
+        .with_ipc_handler(move |req: wry::http::Request<String>| {
+            let _ = p.send_event(Msg::Card(req.body().clone()));
+        })
+        .with_navigation_handler(|u: String| {
+            if u.starts_with(HOME) {
+                return true;
+            }
+            open_external(&u);
+            false
+        });
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let web = wb.build(&win).ok()?;
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let web = {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        wb.build_gtk(win.default_vbox()?).ok()?
+    };
+    win.set_visible(true);
+    Some(Card { web, win })
+}
+
+/// Top right on a Mac (where notifications go), bottom right above the taskbar on Windows.
+fn place_card(target: &EventLoopWindowTarget<Msg>, win: &Window, h: f64) {
+    win.set_inner_size(LogicalSize::new(CARD_W, h));
+    let Some(m) = win.current_monitor().or_else(|| target.primary_monitor()) else { return };
+    let size: LogicalSize<f64> = m.size().to_logical(m.scale_factor());
+    let origin: LogicalPosition<f64> = m.position().to_logical(m.scale_factor());
+    let x = origin.x + size.width - CARD_W - 16.0;
+    let y = if cfg!(target_os = "macos") { origin.y + 44.0 } else { origin.y + size.height - h - 64.0 };
+    win.set_outer_position(LogicalPosition::new(x, y));
+}
+
+/// Watch the clipboard for copied links and ask the engine whether each one is worth a card.
+#[cfg(any(target_os = "macos", windows))]
+fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBool>) {
+    #[cfg(windows)]
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetClipboardSequenceNumber() -> u32;
+    }
+    std::thread::spawn(move || {
+        let mut cb: Option<arboard::Clipboard> = None;
+        let mut last: Option<String> = None;
+        #[cfg(windows)]
+        let mut seq = 0u32;
+        loop {
+            std::thread::sleep(Duration::from_millis(600));
+            // Only look when something new was copied, so Pluck never gets in the way of copy and paste.
+            #[cfg(windows)]
+            {
+                let s = unsafe { GetClipboardSequenceNumber() };
+                if s == seq {
+                    continue;
+                }
+                seq = s;
+            }
+            if cb.is_none() {
+                cb = arboard::Clipboard::new().ok();
+            }
+            let Some(c) = cb.as_mut() else { continue };
+            let text = c.get_text().unwrap_or_default();
+            if last.as_deref() == Some(text.as_str()) {
+                continue;
+            }
+            let first = last.is_none();
+            last = Some(text.clone());
+            // Whatever was copied before Pluck started doesn't count.
+            if first || !on.load(Ordering::Relaxed) {
+                continue;
+            }
+            let t = text.trim();
+            if t.len() < 8 || t.len() > 4000 || !(t.contains("http") || t.contains('/')) {
+                continue;
+            }
+            if let Some(body) = http_get(&format!("/api/clip?u={}", enc(t))) {
+                if body.contains("\"show\":true") {
+                    if let Some(u) = json_str(&body, "url") {
+                        let _ = proxy.send_event(Msg::Clip(u));
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(windows)]
+fn make_tray() -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+    let m = Menu::new();
+    let open = MenuItem::with_id("open", "Open Pluck", true, None);
+    let quit = MenuItem::with_id("quit", "Quit Pluck", true, None);
+    m.append_items(&[&open, &PredefinedMenuItem::separator(), &quit]).ok()?;
+    let icon = tray_icon::Icon::from_rgba(include_bytes!("../icon64.rgba").to_vec(), 64, 64).ok()?;
+    tray_icon::TrayIconBuilder::new()
+        .with_menu(Box::new(m))
+        .with_menu_on_left_click(false)
+        .with_tooltip("Pluck. Copy a link to save it.")
+        .with_icon(icon)
+        .build()
+        .ok()
+}
+
+/// A plain GET to the engine. Returns the body.
+fn http_get(path: &str) -> Option<String> {
+    let addr: SocketAddr = ENGINE.parse().unwrap();
+    let mut s = TcpStream::connect_timeout(&addr, Duration::from_millis(600)).ok()?;
+    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {ENGINE}\r\nConnection: close\r\n\r\n");
+    s.write_all(req.as_bytes()).ok()?;
+    let mut buf = Vec::new();
+    let _ = s.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf).to_string();
+    if !text.starts_with("HTTP/1.1 200") {
+        return None;
+    }
+    text.split_once("\r\n\r\n").map(|(_, b)| b.to_string())
+}
+
+/// Percent encode for a query string.
+fn enc(s: &str) -> String {
+    let mut o = String::new();
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
+            o.push(b as char);
+        } else {
+            o.push_str(&format!("%{b:02X}"));
+        }
+    }
+    o
+}
+
+/// Read one string value out of a small JSON reply.
+fn json_str(body: &str, key: &str) -> Option<String> {
+    let start = body.find(&format!("\"{key}\":\""))? + key.len() + 4;
+    let mut out = String::new();
+    let mut chars = body[start..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'u' => {
+                    let h: String = chars.by_ref().take(4).collect();
+                    out.push(char::from_u32(u32::from_str_radix(&h, 16).ok()?).unwrap_or('?'));
+                }
+                o => out.push(o),
+            },
+            _ => out.push(c),
+        }
+    }
+    None
+}
+
+/// A JavaScript string literal.
+fn js_string(s: &str) -> String {
+    let mut o = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' | '\r' | '\u{2028}' | '\u{2029}' => o.push(' '),
+            '<' => o.push_str("\\u003c"),
+            _ => o.push(c),
+        }
+    }
+    o.push('"');
+    o
 }
 
 /// Is the engine answering?

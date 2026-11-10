@@ -1339,7 +1339,8 @@ function renderSettings() {
       ${sw("ownFolders", "Give carousels, stories and playlists their own folder", "Named after the post, so nothing gets mixed up")}
       ${sw("askEachTime", "Ask where to save every time", "A folder picker opens before each download")}
     </section>
-    <section><h3>Startup</h3>${sw("openAtLogin", "Open Pluck when my computer starts", "Ready the moment you need it")}</section>
+    ${S.shell >= 3 ? `<section><h3>Copied links</h3>${sw("linkPopup", "Pop up when I copy a link", "Copy a Reel, TikTok, pin or video anywhere and save it in one click. Closing the window keeps Pluck running in the " + (S.os === "darwin" ? "Dock" : "taskbar corner") + ".")}</section>` : ""}
+    <section><h3>Startup</h3>${sw("openAtLogin", "Open Pluck when my computer starts", S.shell >= 3 ? "It starts quietly in the background, ready for copied links" : "Ready the moment you need it")}</section>
     <section><h3>Sound</h3>${sw("music", "Music", "Each theme has its own soundtrack")}${sw("sfx", "Sound effects", "Clicks, progress ticks and the done sound")}
       <p class="note">Pluck plays at half of your system volume and goes quiet whenever its window isn't in front.</p></section>
     <section><h3>Stories and private posts</h3>
@@ -1504,6 +1505,8 @@ function closeOnboarding() {
 
 // ============================================================ actions
 let probeSeq = 0, probeTimer;
+// The Pluck window calls this when you pick More options on the copied link card.
+window.pluckOpenLink = (u) => { try { closeOnboarding(); } catch (e) {} setUrl(String(u || ""), true); };
 function pickUrl(raw) {
   const t = String(raw || "").trim(); if (!t) return "";
   const m = t.match(/https?:\/\/[^\s<>"']+/i) || t.match(/(?:^|\s)((?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*)/i);
@@ -1669,7 +1672,7 @@ setInterval(() => { if (S.jobs.some((j) => j.endedAt && Date.now() - j.endedAt <
   $("#dots").innerHTML = ORDER.map((id) => `<button type="button" data-t="${id}" aria-label="${THEMES[id].name} theme" title="${THEMES[id].name}"><span style="background:${THEMES[id].dot}"></span></button>`).join("");
   try {
     const st = await api.get("/api/state");
-    S.settings = st.settings; S.os = st.os; S.version = st.version; S.browsers = st.browsers || []; S.jobs = st.jobs || []; S.update = st.update || {};
+    S.settings = st.settings; S.os = st.os; S.version = st.version; S.shell = st.shell || 0; S.browsers = st.browsers || []; S.jobs = st.jobs || []; S.update = st.update || {};
     S.setup = st.setup || {}; S.app = st.app || {}; S.news = st.news;
     S.prev = new Map(S.jobs.map((j) => [j.id, { status: j.status, item: j.item, pct: j.pct }]));
   } catch { toast("Couldn't reach the Pluck engine. Close the window and open Pluck again."); }
