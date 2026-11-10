@@ -134,10 +134,13 @@ jobs:
           curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["windows"]; print("windows showing Pluck:", n); sys.exit(0 if n >= 1 else 1)'
       - name: Copy a link and check the card pops up
         run: |
+          osascript -e 'tell application "Finder" to activate' || true
+          sleep 2
           printf 'Look at this https://www.youtube.com/watch?v=jNQXAC9IVRw' | pbcopy
           sleep 12
           screencapture -x mac-card.png || true
-          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; n=json.load(sys.stdin)["popups"]; print("cards shown:", n); sys.exit(0 if n >= 1 else 1)'
+          if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-card.png --out mac-card.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-card.jpg && echo "SHOT-END"; fi
+          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; d=json.load(sys.stdin); print("links checked:", d["clipAsks"], "cards shown:", d["popups"]); sys.exit(0 if d["popups"] >= 1 else 1)'
           osascript -e 'tell application "System Events" to tell process "Pluck" to get name of every window' || true
       - uses: actions/upload-artifact@v4
         if: always()
@@ -197,6 +200,8 @@ jobs:
       - name: Copy a link and check the card pops up
         shell: pwsh
         run: |
+          Start-Process notepad
+          Start-Sleep -Seconds 3
           Set-Clipboard -Value "Look at this https://www.youtube.com/watch?v=jNQXAC9IVRw"
           Start-Sleep -Seconds 12
           Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -204,9 +209,21 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$PWD\win-card.png")
-          $n = (Invoke-RestMethod http://127.0.0.1:47821/api/state).popups
-          "cards shown: $n"
-          if ($n -lt 1) { exit 1 }
+          if ("${{ inputs.shots }}" -eq "true") {
+            $w = 1100; $h = [int]($b.Height * $w / $b.Width)
+            $small = New-Object System.Drawing.Bitmap $bmp, $w, $h
+            $enc = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq "image/jpeg" }
+            $ps = New-Object System.Drawing.Imaging.EncoderParameters 1
+            $ps.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 55L
+            $small.Save("$PWD\win-card.jpg", $enc, $ps)
+            "SHOT-BEGIN"
+            $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD\win-card.jpg"))
+            for ($i = 0; $i -lt $b64.Length; $i += 100) { $b64.Substring($i, [Math]::Min(100, $b64.Length - $i)) }
+            "SHOT-END"
+          }
+          $d = Invoke-RestMethod http://127.0.0.1:47821/api/state
+          "links checked: $($d.clipAsks) cards shown: $($d.popups)"
+          if ($d.popups -lt 1) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

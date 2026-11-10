@@ -1572,6 +1572,7 @@ const clients = new Set<Client>();
 let lastSeen = Date.now();
 let lastNative = 0;
 let popups = 0;
+let clipAsks = 0;
 let bTimer: ReturnType<typeof setTimeout> | undefined;
 const enc = new TextEncoder();
 
@@ -1612,7 +1613,7 @@ async function handle(req: Request): Promise<Response> {
     }
     // A link was just copied somewhere: is it one Pluck should offer to save?
     if (path === "/api/clip") {
-      lastNative = Date.now();
+      lastNative = Date.now(); clipAsks++;
       const raw = url.searchParams.get("u") ?? "";
       if (!settings.linkPopup || !/https?:\/\/|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\//i.test(raw) || raw.length > 4000) return json({ show: false });
       const u = pickUrl(raw);
@@ -1632,7 +1633,7 @@ async function handle(req: Request): Promise<Response> {
     }
     if (path === "/api/state") {
       const news = settings.lastVersion && settings.lastVersion !== VERSION ? { version: VERSION, notes: VINFO.notes } : null;
-      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, windows: clients.size, popups, ...snapshot() });
+      return json({ version: VERSION, shell: SHELL, os: OS, settings, browsers: detectBrowsers(), news, windows: clients.size, popups, clipAsks, ...snapshot() });
     }
     if (path === "/api/events") {
       let client: Client;
