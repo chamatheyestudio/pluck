@@ -382,7 +382,20 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
                 cb = arboard::Clipboard::new().ok();
             }
             let Some(c) = cb.as_mut() else { continue };
-            let text = c.get_text().unwrap_or_default();
+            let text = match c.get_text() {
+                Ok(t) => t,
+                // Something that isn't text (a picture, a file): nothing to do.
+                Err(arboard::Error::ContentNotAvailable) => String::new(),
+                // The clipboard is busy (another app is still writing to it): look again shortly.
+                Err(_) => {
+                    #[cfg(windows)]
+                    {
+                        seq = seq.wrapping_sub(1);
+                    }
+                    cb = None;
+                    continue;
+                }
+            };
             if last.as_deref() == Some(text.as_str()) {
                 continue;
             }

@@ -140,7 +140,7 @@ jobs:
           sleep 12
           screencapture -x mac-card.png || true
           if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-card.png --out mac-card.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-card.jpg && echo "SHOT-END"; fi
-          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; d=json.load(sys.stdin); print("links checked:", d["clipAsks"], "cards shown:", d["popups"]); sys.exit(0 if d["popups"] >= 1 else 1)'
+          curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; d=json.load(sys.stdin); print("links checked:", d["clipAsks"], "cards shown:", d["popups"], "window checked in", d["nativeAgo"], "s ago"); sys.exit(0 if d["popups"] >= 1 else 1)'
           osascript -e 'tell application "System Events" to tell process "Pluck" to get name of every window' || true
       - uses: actions/upload-artifact@v4
         if: always()
@@ -222,7 +222,7 @@ jobs:
             "SHOT-END"
           }
           $d = Invoke-RestMethod http://127.0.0.1:47821/api/state
-          "links checked: $($d.clipAsks) cards shown: $($d.popups)"
+          "links checked: $($d.clipAsks) cards shown: $($d.popups) window checked in $($d.nativeAgo)s ago"
           if ($d.popups -lt 1) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
