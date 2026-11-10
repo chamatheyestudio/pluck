@@ -77,17 +77,18 @@ echo "page: $r"
 case "$r" in "done 2"*) ;; *) echo "::error::web page download gave: $r"; cat "$ROOT/pluck.log"; exit 1 ;; esac
 
 # Live sites can block CI machines, so these only warn.
-for u in https://www.pinterest.com/pin/664281013778109217/ https://www.pinterest.com/pin/1084663891475263837/; do
+for u in https://www.instagram.com/p/aye83DjauH/ https://www.instagram.com/p/BQ0eAlwhDrw/ https://www.pinterest.com/pin/664281013778109217/ https://www.pinterest.com/pin/1084663891475263837/; do
   p=$(curl -s "${H[@]}" -d "{\"url\":\"$u\"}" "$API/api/probe" | py 'import json,sys; d=json.load(sys.stdin); print(d.get("error") or "%s %s %s %s" % (d["engine"], d["kind"], [i["type"] for i in d["items"]], d["title"][:40]))' || true)
-  echo "Pinterest $u: $p"
-  case "$p" in gallery*|ytdlp*) ;; *) echo "::warning::Pinterest probe: $p"; continue ;; esac
-  curl -sf "${H[@]}" -d "{\"url\":\"$u\",\"mode\":\"video\"}" "$API/api/download" > /dev/null || true
+  echo "Live $u: $p"
+  case "$p" in gallery*|ytdlp*) ;; *) echo "::warning::Live probe $u: $p"; continue ;; esac
+  case "$p" in gallery*) m=all ;; *) m=video ;; esac
+  curl -sf "${H[@]}" -d "{\"url\":\"$u\",\"mode\":\"$m\"}" "$API/api/download" > /dev/null || true
   for i in $(seq 1 60); do
     r=$(state | py 'import json,sys; j=json.load(sys.stdin)["jobs"][0]; print(j["status"], j["files"], j.get("error") or "")')
     case "$r" in running*|queued*) sleep 2 ;; *) break ;; esac
   done
   echo "  download: $r"
-  case "$r" in done*) ;; *) echo "::warning::Pinterest download: $r" ;; esac
+  case "$r" in done*) ;; *) echo "::warning::Live download $u: $r" ;; esac
 done
 
 if [ -n "${PLUCK_FEED:-}" ]; then

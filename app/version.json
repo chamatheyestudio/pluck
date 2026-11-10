@@ -1,9 +1,9 @@
 {
-  "version": "1.4.2",
+  "version": "1.4.3",
   "shell": 3,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "Copy several links and they line up in one card, each with its own Save, plus Save all. The card stays until you close it.",
-    "Much quicker: the title and picture show up right away, and you can tap Save before Pluck has finished reading the link."
+    "Public Instagram posts, Reels and carousels save without signing in. Stories and private posts still need your browser.",
+    "The copied links card shows where your files go, with a Change button."
   ]
 }

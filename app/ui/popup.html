@@ -37,6 +37,10 @@ button.b:disabled{opacity:.45;cursor:default;filter:none}
 .bar{height:4px;border-radius:2px;background:var(--line);overflow:hidden;margin-top:4px}
 .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .3s}
 .rm{opacity:0;transition:opacity .15s}
+.ft{display:flex;align-items:center;gap:8px;padding:9px 12px 9px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);flex:none}
+.ft span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ft b{color:var(--fg);font-weight:500}
+.ft button{border:0;background:transparent;color:var(--acc);font:600 11px inherit;font-family:inherit;cursor:pointer;padding:4px 2px}
 .row:hover .rm{opacity:1}
 </style>
 </head>
@@ -44,6 +48,7 @@ button.b:disabled{opacity:.45;cursor:default;filter:none}
 <div id="card">
   <div class="hd"><b>pluck</b><span class="n" id="count">Link copied</span><span id="all"></span><button class="x" id="x" type="button" title="Close">×</button></div>
   <div class="list" id="list"></div>
+  <div class="ft"><span>Saves to <b id="folder">your Pluck folder</b></span><button type="button" id="chg">Change</button></div>
 </div>
 <script>
 const $ = (s, r = document) => r.querySelector(s);
@@ -64,7 +69,7 @@ const thumb = (u) => (!u ? "" : u.startsWith("data:") ? u : "/api/thumb?u=" + en
 
 // Keep the window the same height as the card.
 let lastH = 0;
-function fit() { const h = Math.ceil($(".hd").offsetHeight + $("#list").scrollHeight + 2); if (h !== lastH) { lastH = h; native("size:" + h); } }
+function fit() { const h = Math.ceil($(".hd").offsetHeight + $("#list").scrollHeight + $(".ft").offsetHeight + 2); if (h !== lastH) { lastH = h; native("size:" + h); } }
 new ResizeObserver(fit).observe($("#list"));
 function closeAll() { post("/api/copied", { clear: true }).catch(() => {}).finally(() => native("close")); }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(); });
@@ -143,7 +148,8 @@ async function look(r) {
     if (r.want) { save(r, defMode(i)); return; }
     setAct(r, `<button class="b p" data-m="${m}" type="button">${esc(label(m, i))}</button>${mp3 ? `<button class="b" data-m="mp3" type="button">MP3</button>` : ""}`);
   } catch (e) {
-    r.state = "error";
+    r.state = "error"; r.want = null;
+    $(".pf", r.el).textContent = host(r.url);
     $(".th", r.el).classList.remove("load");
     $(".tt", r.el).className = "tt err"; $(".tt", r.el).textContent = e.message;
     setAct(r, `<button class="b" data-do="open" type="button">Open</button><button class="x rm" data-do="rm" type="button" title="Remove">×</button>`);
@@ -200,12 +206,20 @@ function header() {
 $("#card").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   if (b.id === "x") closeAll();
+  if (b.id === "chg") changeFolder();
   if (b.id === "saveAll") for (const r of rows.values()) { if (r.state === "ready") save(r, defMode(r.info)); else if (r.state === "look") early(r, "save"); }
 });
+
+async function folderName() { try { const n = await (await fetch("/api/native")).json(); if (n.folder) $("#folder").textContent = n.folder; } catch (e) {} }
+async function changeFolder() {
+  const r = await post("/api/pick-folder").catch(() => ({}));
+  if (r.path) { await post("/api/settings", { outDir: r.path, askEachTime: false }).catch(() => {}); folderName(); }
+}
 
 (async () => {
   try {
     const n = await (await fetch("/api/native")).json();
+    if (n.folder) $("#folder").textContent = n.folder;
     const t = THEMES[n.theme] || THEMES.matte;
     const s = document.documentElement.style;
     s.setProperty("--bg", t[0]); s.setProperty("--fg", t[1]); s.setProperty("--acc", t[2]); s.setProperty("--accfg", t[3]);

@@ -342,6 +342,34 @@ async function probeYt(url: string, pf: Platform): Promise<Info> {
   throw new Error(lastErr || "probe failed");
 }
 
+// Public Instagram posts, Reels and carousels without signing in, the way the download websites do it:
+// yt-dlp reads Instagram's logged out view, which lists every slide (videos, and photos at full size).
+async function probeInstaPublic(url: string, pf: Platform): Promise<Info> {
+  const r = await run(ytdlp(), [...ytCommon(), "-J", "--ignore-no-formats-error", "--", url], { capture: true, timeoutMs: 45000 });
+  if (r.code !== 0 || !r.out.trim().startsWith("{")) throw new Error(r.err || "Instagram didn't answer");
+  const d = JSON.parse(r.out);
+  const entries: any[] = d._type === "playlist" ? (d.entries ?? []).filter(Boolean) : [d];
+  if (!entries.length) throw new Error("No media found");
+  const isVid = (e: any) => Array.isArray(e.formats) && e.formats.length > 0;
+  // A single video works best as a normal video, so every format and "Just a part" are there.
+  if (entries.length === 1 && isVid(entries[0])) return ytInfo(url, pf, entries[0], 0);
+  const best = (e: any) => { const t = [...(e.thumbnails ?? [])].filter((x: any) => x?.url).sort((a: any, b: any) => (b.width ?? 0) - (a.width ?? 0)); return t[0]?.url ?? e.thumbnail ?? ""; };
+  const items: Item[] = entries.map((e, k) => {
+    const pic = best(e);
+    const vid = isVid(e);
+    if (!vid && !pic) return null;
+    return { i: k, type: vid ? "video" : "photo", thumb: pic, dur: Number(e.duration) || 0, src: vid ? (entries.length > 1 ? `ytpl:${k + 1}` : "ytdl:" + url) : "page:" + pic } as Item;
+  }).filter(Boolean) as Item[];
+  if (!items.length) throw new Error("No media found");
+  const text = String(d.description ?? "").replace(/\s+/g, " ").trim();
+  const author = String(d.channel ?? entries[0].channel ?? "").trim();
+  const title = text ? (text.length > 70 ? text.slice(0, 68).trim() + "..." : text) : author ? `Post by ${author}` : "Instagram post";
+  return {
+    url, platform: pf, engine: "gallery", kind: items.length > 1 ? "gallery" : items[0].type === "photo" ? "photo" : "video",
+    title, author, thumb: items[0].thumb ?? "", duration: 0, maxHeight: 0, items, attempt: 0,
+  };
+}
+
 function ytInfo(url: string, pf: Platform, j: any, attempt: number): Info {
   const isList = j._type === "playlist" || j._type === "multi_video";
   if (isList) {
@@ -510,6 +538,12 @@ async function probe(url: string): Promise<Info> {
   if (pf.id === "spotify") return await probeSpotify(url, pf);
   const isImage = IMAGE_EXT.has(ext(new URL(url).pathname));
   const order = GALLERY_FIRST.has(pf.id) || isImage || (pf.id === "tiktok" && pf.sub === "Photos") ? ["gallery", "ytdlp"] : ["ytdlp", "gallery"];
+  // Public posts and Reels first, without signing in. Stories and private posts still use your browser.
+  if (pf.id === "instagram" && /^\/(?:[\w.]+\/)?(?:p|reels?|tv)\/[\w-]+/.test(new URL(url).pathname)) {
+    const t = Date.now();
+    try { const i = await probeInstaPublic(url, pf); log("probe ok", "instagram public", url, `${Date.now() - t}ms`); return i; }
+    catch (e) { log("probe", "instagram public", url, String(e).slice(0, 300)); }
+  }
   let firstErr = "";
   const t0 = Date.now();
   let settled = false;
@@ -619,6 +653,10 @@ async function fetchDirect(j: Job, src: string, dir: string, n: number): Promise
       } catch (e) { return String(e); }
     }
     src = "ytdl:" + u;
+  }
+  if (src.startsWith("ytpl:")) {
+    const r = await run(ytdlp(), [...ytCommon(), "--playlist-items", src.slice(5), "-f", "bv*+ba/b", "--merge-output-format", "mp4", "-o", `${name}.%(ext)s`, "--", j.info.url], { job: j });
+    return r.code === 0 ? "" : (r.err || r.tail.join("\n"));
   }
   const r = await run(ytdlp(), [...ytCommon(), "--no-playlist", "--referer", j.url, "-f", "bv*+ba/b", "--merge-output-format", "mp4", "-o", `${name}.%(ext)s`, "--", src.slice(5)], { job: j });
   return r.code === 0 ? "" : (r.err || r.tail.join("\n"));
@@ -843,7 +881,7 @@ async function runGallery(j: Job) {
   const attempts = gdAttempts(j.info.platform.id);
   const order = [...attempts.slice(j.info.attempt), ...attempts.slice(0, j.info.attempt)];
   // Some videos (Pinterest, for one) are streams that gallery-dl hands to yt-dlp. Pluck fetches those itself.
-  const streams = sel.filter((i) => /^(ytdl|page):/.test(j.info.items[i]?.src ?? ""));
+  const streams = sel.filter((i) => /^(ytdl|ytpl|page):/.test(j.info.items[i]?.src ?? ""));
   const gsel = sel.filter((i) => !streams.includes(i));
   let files: string[] = [];
   let lastErr = "";
@@ -1677,7 +1715,10 @@ async function handle(req: Request): Promise<Response> {
     if (path === "/api/peek") return json(await peek(pickUrl(url.searchParams.get("u") ?? "")));
     if (path === "/api/native") {
       lastNative = Date.now();
-      return json({ popup: settings.linkPopup, theme: settings.theme });
+      const home = Deno.env.get("HOME") ?? Deno.env.get("USERPROFILE") ?? "";
+      const rel = home && settings.outDir.startsWith(home) ? settings.outDir.slice(home.length) : settings.outDir;
+      const folder = rel.split(/[\\/]+/).filter(Boolean).join(" › ") || settings.outDir;
+      return json({ popup: settings.linkPopup, theme: settings.theme, folder });
     }
     // A link was just copied somewhere: is it one Pluck should offer to save?
     if (path === "/api/clip") {
