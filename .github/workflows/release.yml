@@ -126,7 +126,7 @@ jobs:
           scripts/e2e.sh "$HOME/Library/Application Support/Pluck"
       - name: Open the Pluck window
         run: |
-          open -a /Applications/Pluck.app
+          PLUCK_NATIVE_LOG="$RUNNER_TEMP/native.log" /Applications/Pluck.app/Contents/MacOS/Pluck > /dev/null 2>&1 &
           sleep 15
           screencapture -x mac-window.png || true
           if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-window.png --out mac-small.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-small.jpg && echo "SHOT-END"; fi
@@ -141,6 +141,7 @@ jobs:
           screencapture -x mac-card.png || true
           if [ "${{ inputs.shots }}" = "true" ]; then sips -Z 1100 -s format jpeg -s formatOptions 55 mac-card.png --out mac-card.jpg >/dev/null && echo "SHOT-BEGIN" && base64 -b 100 -i mac-card.jpg && echo "SHOT-END"; fi
           curl -s http://127.0.0.1:47821/api/state | python3 -c 'import json,sys; d=json.load(sys.stdin); print("links checked:", d["clipAsks"], "cards shown:", d["popups"], "window checked in", d["nativeAgo"], "s ago"); sys.exit(0 if d["popups"] >= 1 else 1)'
+          cat "$RUNNER_TEMP/native.log" || true
           osascript -e 'tell application "System Events" to tell process "Pluck" to get name of every window' || true
       - uses: actions/upload-artifact@v4
         if: always()
@@ -173,6 +174,7 @@ jobs:
       - name: Open the Pluck window
         shell: pwsh
         run: |
+          $env:PLUCK_NATIVE_LOG = "$env:RUNNER_TEMP\native.log"
           Start-Process "$env:LOCALAPPDATA\Pluck\Pluck.exe"
           Start-Sleep -Seconds 20
           Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -223,6 +225,7 @@ jobs:
           }
           $d = Invoke-RestMethod http://127.0.0.1:47821/api/state
           "links checked: $($d.clipAsks) cards shown: $($d.popups) window checked in $($d.nativeAgo)s ago"
+          Get-Content "$env:RUNNER_TEMP\native.log" -ErrorAction SilentlyContinue
           if ($d.popups -lt 1) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()

@@ -376,10 +376,17 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
                 if s == seq {
                     continue;
                 }
+                note(&format!("clipboard changed {seq} -> {s}"));
                 seq = s;
             }
             if cb.is_none() {
-                cb = arboard::Clipboard::new().ok();
+                cb = match arboard::Clipboard::new() {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        note(&format!("clipboard open failed: {e}"));
+                        None
+                    }
+                };
             }
             let Some(c) = cb.as_mut() else { continue };
             let text = match c.get_text() {
@@ -387,7 +394,8 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
                 // Something that isn't text (a picture, a file): nothing to do.
                 Err(arboard::Error::ContentNotAvailable) => String::new(),
                 // The clipboard is busy (another app is still writing to it): look again shortly.
-                Err(_) => {
+                Err(e) => {
+                    note(&format!("clipboard read failed: {e}"));
                     #[cfg(windows)]
                     {
                         seq = seq.wrapping_sub(1);
@@ -400,6 +408,7 @@ fn watch_clipboard(proxy: tao::event_loop::EventLoopProxy<Msg>, on: Arc<AtomicBo
                 continue;
             }
             let first = last.is_none();
+            note(&format!("copied {} chars, first={first}", text.len()));
             last = Some(text.clone());
             // Whatever was copied before Pluck started doesn't count.
             if first || !on.load(Ordering::Relaxed) {
@@ -435,6 +444,15 @@ fn make_tray() -> Option<tray_icon::TrayIcon> {
         .with_icon(icon)
         .build()
         .ok()
+}
+
+/// Notes for the release tests, only when PLUCK_NATIVE_LOG names a file.
+fn note(m: &str) {
+    if let Some(p) = std::env::var_os("PLUCK_NATIVE_LOG") {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {
+            let _ = writeln!(f, "{m}");
+        }
+    }
 }
 
 /// A plain GET to the engine. Returns the body.
