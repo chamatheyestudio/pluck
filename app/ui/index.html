@@ -127,6 +127,14 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(360px,440px) 
 .segs span.cur{background:var(--accent);opacity:.5;animation:blink .9s ease-in-out infinite}
 .queue{display:flex;flex-direction:column;gap:6px;max-height:122px;overflow-y:auto}
 .queue:empty{display:none}
+.qh[hidden]{display:none}
+.chb{display:flex;gap:14px}
+.copied .qx{cursor:pointer}
+.copied .qx:hover b{text-decoration:underline;text-underline-offset:3px}
+.copied .qr{animation:cin .35s ease}
+@keyframes cin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.qr .xs{width:26px;height:26px;border:0;background:transparent;color:var(--muted);font-size:16px;line-height:1;cursor:pointer;flex:none;border-radius:6px}
+.qr .xs:hover{color:var(--fg);background:var(--line)}
 .qh{display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .qr{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:calc(var(--card-radius) * .7);border:var(--q-border,1px solid var(--line));background:var(--q-bg,transparent)}
 .qr .qt{width:34px;height:34px;flex:none;border-radius:7px;background:var(--line) center/cover no-repeat}
@@ -669,6 +677,8 @@ footer .fl{overflow:hidden;text-overflow:ellipsis}
         <div class="stx"><span id="stageText" aria-live="polite">Ready</span><span id="meta"></span><button class="link" id="stageAction" type="button" hidden></button></div>
       </div>
       <div class="segs" id="segs"></div>
+      <div class="qh" id="ch" hidden><span id="chTitle">Copied</span><span class="chb"><button class="link" id="btnDlAll" type="button">Download all</button><button class="link" id="btnClrCopied" type="button">Clear</button></span></div>
+      <div class="queue copied" id="copied"></div>
       <div class="qh" id="qh" hidden><span>Queue</span><button class="link" id="btnClear" type="button">Clear finished</button></div>
       <div class="queue" id="queue"></div>
     </section>
@@ -1209,6 +1219,7 @@ function render() {
     s.className = c;
   });
   STAGES[S.theme].update($("#art"), v);
+  renderCopied(T);
   renderQueue(T);
 }
 
@@ -1310,6 +1321,18 @@ function cutForDownload() {
   return { from: S.cutFrom || 0, to: S.cutTo };
 }
 
+// Links copied anywhere wait here. Nothing downloads until you press Download.
+function renderCopied(T) {
+  const list = S.copied || [];
+  $("#ch").hidden = !list.length;
+  const t = `Copied · ${list.length} waiting`;
+  $("#chTitle").textContent = T.upper ? t.toUpperCase() : t;
+  const html = list.map((c) => `<div class="qr"><span class="qt" style="${c.thumb ? `background-image:url('${thumbUrl(c.thumb)}')` : ""}"></span>
+    <div class="qx" data-curl="${esc(c.url)}" title="Open it here to pick the format"><b>${esc(c.title || c.url.replace(/^https?:\/\/(www\.)?/, ""))}</b><small class="${c.err ? "err" : ""}">${esc(c.site || "")} · ${esc(c.err || (c.busy ? "Adding to the queue" : c.title ? "Ready" : "Taking a look"))}</small></div>
+    <button class="btn sm" data-cdl="${esc(c.url)}" type="button"${c.busy ? " disabled" : ""}>Download</button><button class="xs" data-crm="${esc(c.url)}" type="button" title="Remove" aria-label="Remove">×</button></div>`).join("");
+  if ($("#copied").dataset.html !== html) { $("#copied").innerHTML = html; $("#copied").dataset.html = html; }
+}
+
 function renderQueue(T) {
   const list = S.jobs.slice(0, 30);
   $("#qh").hidden = !list.length;
@@ -1339,7 +1362,7 @@ function renderSettings() {
       ${sw("ownFolders", "Give carousels, stories and playlists their own folder", "Named after the post, so nothing gets mixed up")}
       ${sw("askEachTime", "Ask where to save every time", "A folder picker opens before each download")}
     </section>
-    ${S.shell >= 3 ? `<section><h3>Copied links</h3>${sw("linkPopup", "Pop up when I copy a link", "Copy a Reel, TikTok, pin or video anywhere and save it in one click. Closing the window keeps Pluck running in the " + (S.os === "darwin" ? "Dock" : "taskbar corner") + ".")}</section>` : ""}
+    ${S.shell >= 3 ? `<section><h3>Copied links</h3>${sw("linkPopup", "Collect links I copy", "Copy a Reel, TikTok, pin or video anywhere and it waits in the Copied list here, with a small note so you know. Nothing downloads until you say so. Closing the window keeps Pluck running in the " + (S.os === "darwin" ? "Dock" : "taskbar corner") + ".")}</section>` : ""}
     <section><h3>Startup</h3>${sw("openAtLogin", "Open Pluck when my computer starts", S.shell >= 3 ? "It starts quietly in the background, ready for copied links" : "Ready the moment you need it")}</section>
     <section><h3>Sound</h3>${sw("music", "Music", "Each theme has its own soundtrack")}${sw("sfx", "Sound effects", "Clicks, progress ticks and the done sound")}
       <p class="note">Pluck plays at half of your system volume and goes quiet whenever its window isn't in front.</p></section>
@@ -1506,7 +1529,11 @@ function closeOnboarding() {
 // ============================================================ actions
 let probeSeq = 0, probeTimer;
 // The Pluck window calls this when you pick More options on the copied link card.
-window.pluckOpenLink = (u) => { try { closeOnboarding(); } catch (e) {} setUrl(String(u || ""), true); };
+window.pluckOpenLink = (u) => {
+  try { closeOnboarding(); } catch (e) {}
+  if (u) setUrl(String(u), true);
+  else { const c = $("#ch"); if (c && !c.hidden) c.scrollIntoView({ behavior: "smooth", block: "center" }); }
+};
 function pickUrl(raw) {
   const t = String(raw || "").trim(); if (!t) return "";
   const m = t.match(/https?:\/\/[^\s<>"']+/i) || t.match(/(?:^|\s)((?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*)/i);
@@ -1564,7 +1591,7 @@ function onSnapshot(d) {
     }
   }
   S.prev = new Map(d.jobs.map((j) => [j.id, { status: j.status, item: j.item, pct: j.pct }]));
-  S.jobs = d.jobs; if (d.update) S.update = d.update; if (d.setup) S.setup = d.setup; if (d.app) S.app = d.app;
+  S.jobs = d.jobs; if (d.copied) S.copied = d.copied; if (d.update) S.update = d.update; if (d.setup) S.setup = d.setup; if (d.app) S.app = d.app;
   render(); renderSetup(); renderUpd(); renderObSetup();
   if ($("#settings").classList.contains("on")) renderSettings();
 }
@@ -1572,6 +1599,8 @@ function onSnapshot(d) {
 // ============================================================ wiring
 document.addEventListener("click", async (e) => {
   Sound.unlock();
+  const cu = e.target.closest("[data-curl]");
+  if (cu) { Sound.sfx("tap"); setUrl(cu.dataset.curl, true); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
   const b = e.target.closest("button"); if (!b) return;
   if (b.closest("#onboard")) { if (b.dataset.t) { Sound.unlock(); closeOnboarding(); applyTheme(b.dataset.t, true); setTimeout(() => Sound.sfx("done"), 120); renderSetup(); renderUpd(); } return; }
   if (b.id === "suRetry") { S.setupDismissed = false; Sound.sfx("start"); api.post("/api/setup").catch((er) => toast(er.message)); return; }
@@ -1584,6 +1613,10 @@ document.addEventListener("click", async (e) => {
   if (b.classList.contains("tile") || b.classList.contains("trk")) { const i = Number(b.dataset.i); S.sel.has(i) ? S.sel.delete(i) : S.sel.add(i); Sound.sfx("tap"); render(); return; }
   if (b.id === "btnSelAll") { const all = S.sel.size === S.probe.items.length; S.sel = new Set(all ? [] : S.probe.items.map((i) => i.i)); Sound.sfx("tap"); render(); return; }
   if (b.closest("#dots")) { applyTheme(b.dataset.t, true); Sound.sfx("tap"); return; }
+  if (b.dataset.cdl) { Sound.sfx("start"); api.post("/api/copied", { download: b.dataset.cdl }).catch((er) => toast(er.message)); return; }
+  if (b.dataset.crm) { Sound.sfx("tap"); api.post("/api/copied", { remove: b.dataset.crm }).catch(() => {}); return; }
+  if (b.id === "btnDlAll") { Sound.sfx("start"); api.post("/api/copied", { download: "all" }).catch((er) => toast(er.message)); return; }
+  if (b.id === "btnClrCopied") { Sound.sfx("tap"); api.post("/api/copied", { clear: true }).catch(() => {}); return; }
   if (b.dataset.act) {
     const id = b.dataset.id;
     if (b.dataset.act === "reveal") { const j = S.jobs.find((x) => x.id === id); if (j) api.post("/api/reveal", { path: j.files[0] || j.folder }).catch((er) => toast(er.message)); }
@@ -1672,7 +1705,7 @@ setInterval(() => { if (S.jobs.some((j) => j.endedAt && Date.now() - j.endedAt <
   $("#dots").innerHTML = ORDER.map((id) => `<button type="button" data-t="${id}" aria-label="${THEMES[id].name} theme" title="${THEMES[id].name}"><span style="background:${THEMES[id].dot}"></span></button>`).join("");
   try {
     const st = await api.get("/api/state");
-    S.settings = st.settings; S.os = st.os; S.version = st.version; S.shell = st.shell || 0; S.browsers = st.browsers || []; S.jobs = st.jobs || []; S.update = st.update || {};
+    S.settings = st.settings; S.os = st.os; S.version = st.version; S.shell = st.shell || 0; S.browsers = st.browsers || []; S.jobs = st.jobs || []; S.copied = st.copied || []; S.update = st.update || {};
     S.setup = st.setup || {}; S.app = st.app || {}; S.news = st.news;
     S.prev = new Map(S.jobs.map((j) => [j.id, { status: j.status, item: j.item, pct: j.pct }]));
   } catch { toast("Couldn't reach the Pluck engine. Close the window and open Pluck again."); }

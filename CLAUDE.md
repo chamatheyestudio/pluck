@@ -15,7 +15,8 @@ joke that fits the theme. Keep it that way.
   it starts the engine in the background, shows a warm up screen until the engine answers, then shows the UI.
   One copy at a time (a second launch focuses the first). Mac gets a real menu bar so copy and paste work.
   It watches the clipboard: when a link is copied it asks the engine (`/api/clip`) and, if it's one Pluck can
-  save, opens a small card in the corner that loads `ui/popup.html` (so the card itself updates with the app).
+  save, adds it to the engine's Copied list (nothing downloads until the user says so) and opens a small note in
+  the corner that loads `ui/popup.html` (so the note itself updates with the app).
   While "Pop up when I copy a link" is on, closing the window hides it (Dock on Mac, tray icon on Windows) and
   `--background` starts it hidden at login. It checks in with the engine every 10 seconds (`/api/native`).
 - `shell/launch.ts`: the launcher that ships inside the installers. It picks the newest good copy of the app

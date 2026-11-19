@@ -1,9 +1,9 @@
 {
-  "version": "1.4.3",
+  "version": "1.4.4",
   "shell": 3,
   "feed": "https://github.com/chamatheyestudio/pluck/releases/latest/download/latest.json",
   "notes": [
-    "Public Instagram posts, Reels and carousels save without signing in. Stories and private posts still need your browser.",
-    "The copied links card shows where your files go, with a Change button, and scrolls when you copy lots of links."
+    "Copied links now wait in a Copied list inside Pluck. Nothing downloads until you press Download or Download all.",
+    "A small note tells you each link was added. Tap a copied link to open it with every format option."
   ]
 }

@@ -665,6 +665,19 @@ const kindOfUrl = (u: string) => { const e = ext(u.split(/[?#]/)[0]); return VID
 
 // ---------------------------------------------------------------- jobs
 
+function newJob(u: string, info: Info, body: any): Job {
+  const j: Job = {
+    id: uid(), url: u, info, mode: String(body.mode ?? "video"), quality: String(body.quality ?? "best"),
+    select: Array.isArray(body.select) ? body.select.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n < info.items.length) : [],
+    dir: body.dir ? String(body.dir) : undefined,
+    cut: parseCut(body.cut, info),
+    status: "queued", phase: "queued", sub: "", pct: 0, speed: "", eta: "", item: 0, items: 0, files: [], folder: "", error: "", warn: "",
+    created: Date.now(), endedAt: 0, procs: new Set(), canceled: false, tmp: "",
+  };
+  if (info.items.length > 1 && j.select.length === info.items.length) j.select = [];
+  return j;
+}
+
 function parseCut(c: any, info: Info): Cut | undefined {
   if (!c || typeof c !== "object" || info.engine === "spotify") return undefined;
   const from = Math.max(0, Number(c.from) || 0);
@@ -1675,13 +1688,47 @@ let lastSeen = Date.now();
 let lastNative = 0;
 let popups = 0;
 // Links copied since the card was last closed, newest first.
-const copied: { url: string; job?: string }[] = [];
+// Copied links wait here until you download them (nothing downloads on its own).
+type Copied = { url: string; site: string; title?: string; thumb?: string; err?: string; busy?: boolean };
+const copied: Copied[] = [];
+function addCopied(u: string) {
+  const old = copied.find((x) => x.url === u);
+  const c: Copied = old ?? { url: u, site: detect(u).name };
+  copied.splice(0, copied.length, c, ...copied.filter((x) => x !== c));
+  copied.length = Math.min(copied.length, 50);
+  if (!old) {
+    peek(u).then((q) => { if (!c.title && q.title) c.title = q.title; if (!c.thumb && q.thumb) c.thumb = q.thumb; broadcast(); });
+    if (have("ytdlp") && !setupRun) probeShared(u).then((i) => { c.title = i.title || c.title; c.thumb = i.thumb || c.thumb; c.err = ""; broadcast(); }, (e) => { c.err = e instanceof Friendly ? e.message : friendly(String(e)); broadcast(); });
+  }
+  broadcast();
+}
+// What a quick download picks: the video, the photos, or the song.
+function defaultMode(i: Info): string {
+  const types = new Set(i.items.map((x) => x.type));
+  if (i.engine === "spotify") return "mp3";
+  if (i.engine === "ytdlp") return i.kind === "audio" || (i.kind === "gallery" && !types.has("video")) ? "mp3" : "video";
+  if (i.kind === "gallery") return types.has("video") ? (types.has("photo") ? "all" : "videos") : "photos";
+  if (i.kind === "photo") return "photos";
+  if (i.kind === "audio") return "orig";
+  return "videos";
+}
+async function downloadCopied(c: Copied) {
+  if (c.busy) return;
+  c.busy = true; c.err = ""; broadcast();
+  try {
+    const info = await probeShared(c.url);
+    jobs.push(newJob(c.url, info, { mode: defaultMode(info) })); pump();
+    const k = copied.indexOf(c); if (k >= 0) copied.splice(k, 1);
+  } catch (e) { c.err = e instanceof Friendly ? e.message : friendly(String(e)); }
+  c.busy = false; broadcast();
+}
 let clipAsks = 0;
 let bTimer: ReturnType<typeof setTimeout> | undefined;
 const enc = new TextEncoder();
 
+const pubCopied = (c: Copied) => ({ url: c.url, site: c.site, title: c.title ?? "", thumb: c.thumb ?? "", err: c.err ?? "", busy: !!c.busy });
 function snapshot() {
-  return { jobs: [...jobs].sort((a, b) => b.created - a.created).slice(0, 40).map(publicJob), update: updateState, setup, app: appUpd, restarting };
+  return { copied: copied.map(pubCopied), jobs: [...jobs].sort((a, b) => b.created - a.created).slice(0, 40).map(publicJob), update: updateState, setup, app: appUpd, restarting };
 }
 function broadcast() {
   if (bTimer) return;
@@ -1711,7 +1758,7 @@ async function handle(req: Request): Promise<Response> {
       return new Response(await Deno.readTextFile(join(APP_DIR, "ui", "popup.html")), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     // The Pluck window checks in now and then while it runs in the background.
-    if (path === "/api/copied") return json({ links: copied });
+    if (path === "/api/copied") return json({ links: copied.map(pubCopied) });
     if (path === "/api/peek") return json(await peek(pickUrl(url.searchParams.get("u") ?? "")));
     if (path === "/api/native") {
       lastNative = Date.now();
@@ -1735,10 +1782,8 @@ async function handle(req: Request): Promise<Response> {
         if (pf.id === "youtube" && !/\/(watch|shorts|live|embed|playlist)|youtu\.be\/./.test(u)) ok = false;
         if (pf.id === "spotify" && pf.sub === "Link") ok = false;
       } catch { ok = false; }
-      // Start reading the link right away, so the card has it sooner.
-      if (ok && have("ytdlp") && !setupRun) probeShared(u).catch(() => {});
-      if (ok) peek(u);
-      if (ok) { const old = copied.find((x) => x.url === u); copied.splice(0, copied.length, old ?? { url: u }, ...copied.filter((x) => x.url !== u)); copied.length = Math.min(copied.length, 12); }
+      // Add it to the Copied list and start reading it, so it's quick when you download.
+      if (ok) addCopied(u);
       return json(ok ? { show: true, url: u } : { show: false });
     }
     if (path === "/icon.png") {
@@ -1798,15 +1843,8 @@ async function handle(req: Request): Promise<Response> {
         let u = pickUrl(String(body.url ?? ""));
         let info = probeCache.get(u);
         if (!info) info = await probeShared(u);
-        const j: Job = {
-          id: uid(), url: u, info, mode: String(body.mode ?? "video"), quality: String(body.quality ?? "best"),
-          select: Array.isArray(body.select) ? body.select.map(Number).filter((n: number) => Number.isInteger(n) && n >= 0 && n < info!.items.length) : [],
-          dir: body.dir ? String(body.dir) : undefined,
-          cut: parseCut(body.cut, info),
-          status: "queued", phase: "queued", sub: "", pct: 0, speed: "", eta: "", item: 0, items: 0, files: [], folder: "", error: "", warn: "",
-          created: Date.now(), endedAt: 0, procs: new Set(), canceled: false, tmp: "",
-        };
-        if (info.items.length > 1 && j.select.length === info.items.length) j.select = [];
+        const j = newJob(u, info, body);
+        { const k = copied.findIndex((x) => x.url === u); if (k >= 0) copied.splice(k, 1); }
         jobs.push(j); broadcast(); pump();
         return json(publicJob(j));
       }
@@ -1839,8 +1877,10 @@ async function handle(req: Request): Promise<Response> {
       case "/api/copied": {
         if (body.clear) copied.length = 0;
         else if (body.remove) { const i = copied.findIndex((x) => x.url === String(body.remove)); if (i >= 0) copied.splice(i, 1); }
-        else if (body.url && body.job) { const c = copied.find((x) => x.url === String(body.url)); if (c) c.job = String(body.job); else copied.unshift({ url: String(body.url), job: String(body.job) }); }
-        return json({ links: copied });
+        else if (body.download === "all") for (const c of [...copied]) downloadCopied(c);
+        else if (body.download) { const c = copied.find((x) => x.url === String(body.download)); if (c) downloadCopied(c); }
+        broadcast();
+        return json({ links: copied.map(pubCopied) });
       }
       case "/api/settings": {
         const allowed = ["theme", "outDir", "askEachTime", "ownFolders", "openAtLogin", "music", "sfx", "browser", "lastVersion", "linkPopup"] as const;
